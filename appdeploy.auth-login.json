@@ -1,7 +1,7 @@
 {
-  "methods": ["google", "apple", "x"],
+  "methods": ["google"],
   "headline": "Sign in to BidWatch",
-  "subtitle": "Use your company account to access the internal bid tracker.",
+  "subtitle": "Use your provisioned company Google account to access the internal bid tracker.",
   "style": {
     "mode": "light",
     "accentColor": "#17202a",
