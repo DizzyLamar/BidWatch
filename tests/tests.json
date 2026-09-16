@@ -1,0 +1,37 @@
+[
+  {
+    "name":"Sign in and create a bid with an attachment",
+    "sanity":true,
+    "viewport":"desktop",
+    "covers":["authentication","bid creation","database create/read","deadline capture","file storage upload","activity logging"],
+    "description":"Verifies the core BidWatch workflow from authenticated access through creating a persistent tender and attaching a source document.",
+    "steps":["Sign in to BidWatch","Open Add bid and enter title \"Network Security RFP\", organisation \"Example Org\", and a deadline 10 days in the future","Attach a small PDF and save the bid","Open the new bid from All Bids"],
+    "expected":"The bid appears with its deadline and New status, the attachment is visible in the detail view, and the activity history records creation and upload."
+  },
+  {
+    "name":"Authorised user applies a bid while a member is blocked",
+    "viewport":"desktop",
+    "covers":["authentication","role authorization","status transition","Applied audit record","cross-user visibility"],
+    "description":"Verifies that Applied is restricted to authorised users and that the resulting state is visible to the team.",
+    "setup":["Create a bid named \"Application Control RFP\" as Actor A"],
+    "steps":["Actor A signs in as an authorised user and opens the bid","Actor B signs in as a Member and attempts to mark the bid Applied","Actor A signs in again, enters submission reference \"SUB-1001\", and confirms Applied","Actor B opens the same bid"],
+    "expected":"Actor B's attempt is denied; Actor A can mark the bid Applied; the bid shows Applied, the submission reference is retained, and Actor B can see the Applied status."
+  },
+  {
+    "name":"Search, filter, and review deadline reminders",
+    "viewport":"desktop",
+    "covers":["search","status filter","category filter","deadline urgency","in-app notifications","cron reminder persistence"],
+    "description":"Verifies that a team member can narrow the bid list and see deadline reminders for actionable bids.",
+    "setup":["Create bids with different categories, statuses, and deadlines including one due within 3 days"],
+    "steps":["Open All Bids and search for the organisation of the near-deadline bid","Filter by its category and Reviewing status","Open Notifications"],
+    "expected":"Only matching bids remain in the list, the nearest deadline displays an urgency label, and the notification center can show a deadline reminder for the actionable bid."
+  },
+  {
+    "name":"Reject invalid bid creation and protect admin controls",
+    "viewport":"mobile",
+    "covers":["required-field validation","mobile form behavior","admin route authorization","destructive permission guardrail"],
+    "description":"Verifies invalid tender input is blocked and non-admin users cannot access administration data.",
+    "steps":["Open Add bid on a mobile viewport and submit with the title, organisation, and deadline empty","Sign in as a Member and attempt to open the People administration view directly","Attempt to mark an existing bid Declined as the Member"],
+    "expected":"A required-field validation message is shown without creating a bid, People data is unavailable to the Member, and the Declined action is denied."
+  }
+]
