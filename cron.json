@@ -1,0 +1,8 @@
+[
+  {
+    "name": "bid-deadline-reminders",
+    "cron": "0 7 * * *",
+    "handler": "reminderHandler",
+    "timezone": "Africa/Blantyre"
+  }
+]
