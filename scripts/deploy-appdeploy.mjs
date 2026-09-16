@@ -46,6 +46,9 @@ async function rpc(method, args) {
     body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: method, arguments: args } }),
   });
   const text = await response.text();
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('AppDeploy authentication failed. The APPDEPLOY_API_KEY GitHub Actions secret is missing, expired, revoked, or invalid. Rotate the AppDeploy key and replace the GitHub secret before retrying deployment.');
+  }
   if (!response.ok) throw new Error(`AppDeploy HTTP ${response.status}: ${text.slice(0, 500)}`);
   const dataLines = text.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).filter(Boolean);
   const payload = dataLines.length ? JSON.parse(dataLines.at(-1)) : JSON.parse(text);
