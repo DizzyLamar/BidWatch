@@ -15,7 +15,7 @@ for (const test of tests) {
 const frontend = read('src/App.tsx');
 const backend = read('backend/index.ts');
 const css = read('src/index.css');
-const uxCss = read('src/ux.css');
+const uiCss = read('src/ui-system.css');
 
 for (const [pattern, description] of [
   ['dangerouslySetInnerHTML', 'raw HTML rendering'],
@@ -34,7 +34,7 @@ for (const [pattern, description] of [
   if (!backend.includes(pattern)) failures.push(`Backend security/lifecycle regression: ${description} missing.`);
 }
 
-if (!uxCss.includes('.modal-backdrop')) failures.push('Confirmation modal styling is missing.');
+if (!uiCss.includes('.modal-backdrop')) failures.push('Confirmation modal styling is missing from the UI system.');
 if (!css.includes('.form-error')) failures.push('Inline production error styling is missing.');
 
 if (failures.length) {
