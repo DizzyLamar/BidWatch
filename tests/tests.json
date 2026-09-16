@@ -1,6 +1,6 @@
 [
   {
-    "name": "Provisioned Google user can sign in and create a bid",
+    "name": "Provisioned Google user can create and retain a bid",
     "sanity": true,
     "viewport": "desktop",
     "covers": ["Google authentication", "provisioned-user authorization", "bid creation", "database create/read", "KPI overview"],
@@ -9,12 +9,13 @@
     "expected": "The provisioned user enters BidWatch, the bid persists, and permitted KPI cards are visible without exposing restricted administration metrics."
   },
   {
-    "name": "Unprovisioned Google identity is denied",
+    "name": "Destructive deletion preserves a text-only bid history record",
     "viewport": "desktop",
-    "covers": ["default-deny authorization", "unprovisioned-user access boundary"],
-    "description": "Verifies authentication alone does not create a BidWatch account or grant application access.",
-    "steps": ["Sign in with a Google identity that has not been provisioned by an administrator"],
-    "expected": "BidWatch denies application access with a clear provisioning message and does not create a Member account."
+    "covers": ["bid deletion", "destructive-action confirmation", "bid history archive", "document lifecycle"],
+    "description": "Verifies an irreversible bid deletion requires explicit confirmation and preserves the bid metadata after stored documents are removed.",
+    "setup": ["Create a bid titled \"Historical RFP\" with organisation \"Example Org\" and a small PDF attachment"],
+    "steps": ["Open the bid", "Choose Delete bid and documents", "Review the impact message and choose Keep it", "Choose Delete bid and documents again", "Choose Delete bid in the confirmation dialog", "Open Bid History"],
+    "expected": "The bid disappears from active bids, its stored document is removed, and a text-only history record remains with the bid title, organisation, deadline, status and deletion date."
   },
   {
     "name": "Protected workflow transitions require their own permissions",
@@ -29,17 +30,17 @@
     "name": "Sensitive roles cannot be self-escalated",
     "viewport": "desktop",
     "covers": ["role assignment authorization", "vertical privilege escalation prevention", "sensitive permission protection"],
-    "description": "Verifies non-Super-Admin access managers cannot grant themselves or another user a sensitive access-control role.",
+    "description": "Verifies non-Super-Admin access managers cannot grant sensitive access-control permissions.",
     "steps": ["Sign in as a non-Super-Admin user with role-management capability", "Create or edit a custom role and attempt to include users.manage, roles.manage, or settings.manage", "Attempt to assign a sensitive role"],
     "expected": "The backend rejects sensitive permission allocation or assignment and the protected Super Admin remains the only authority for sensitive access."
   },
   {
-    "name": "Storage lifecycle remains consistent after document deletion",
+    "name": "Production errors are actionable without exposing internals",
     "viewport": "mobile",
-    "covers": ["secure file upload validation", "attachment deletion", "storage abstraction", "orphan detection", "destructive-action confirmation"],
-    "description": "Verifies permitted documents use the managed storage service and deletion removes the metadata and stored object together.",
-    "setup": ["Create a bid with a small PDF attachment"],
-    "steps": ["Open the bid", "Delete the PDF and confirm", "Open Administration > Storage as a permitted administrator"],
-    "expected": "The document is gone from the bid and storage accounting does not show the deleted document as an orphan."
+    "covers": ["server error handling", "user-visible error state", "safe error messaging", "recovery behavior"],
+    "description": "Verifies a simulated server failure is surfaced as a concise user-facing error rather than a blank screen or technical stack trace.",
+    "qa_faults": [{"method":"POST","path":"/api/tenders","status":500,"body_json":{"error":"simulated_internal_failure","stack":"SECRET_STACK_TRACE"}}],
+    "steps": ["Open Add bid", "Enter a valid bid", "Submit while the server returns the simulated 500 response"],
+    "expected": "The UI shows a plain-language failure message and does not display the injected stack trace or internal implementation details."
   }
 ]
