@@ -1,7 +1,45 @@
 [
-  {"name":"First sign-in completes the BidWatch introduction before the workspace","sanity":true,"viewport":"desktop","covers":["Google authentication","provisioned-user authorization","first-login onboarding","onboarding completion persistence","bid creation"],"description":"Verifies a provisioned user receives a concise first-use introduction, can complete it, and can then use the normal bid workflow.","steps":["Sign in with the provisioned Google account for a user who has not completed onboarding","Review the three-step BidWatch introduction","Choose Start using BidWatch on the final step","Open Add bid and create a valid bid titled \"Network Security RFP\"","Refresh BidWatch"],"expected":"The onboarding dialog is shown only before completion, the user reaches the Dashboard, the bid persists, and the introduction does not reappear after refresh."},
-  {"name":"Dashboard deadline cards and popup overlays remain usable at mobile width","viewport":"mobile","covers":["mobile dashboard layout","My deadlines readability","Unassigned bids readability","text spacing and overflow prevention","mobile navigation overlay layering","popup outside-click behavior"],"description":"Verifies the Dashboard remains readable and overlay interactions remain usable on narrow screens.","steps":["Sign in as a role that can see personal and team deadline summaries","Open Dashboard at 375x667","Review My deadlines and Unassigned bids cards","Open the mobile navigation and confirm the navigation remains visually above its backdrop","Tap the backdrop outside the navigation and confirm it closes","Open Notifications or the profile menu, then tap outside it and confirm it closes","Increase browser text size or zoom and review the same cards"],"expected":"Dashboard cards have visible spacing from borders, remain readable without clipping, the mobile navigation is above its backdrop, and popup/navigation overlays close when the user taps outside them."},
-  {"name":"Destructive deletion preserves a text-only bid history record","viewport":"desktop","covers":["bid deletion","destructive-action confirmation","bid history archive","document lifecycle","GET /api/history"],"description":"Verifies an irreversible bid deletion requires explicit confirmation and preserves the bid metadata after stored documents are removed.","setup":["Create a bid titled \"Historical RFP\" with organisation \"Example Org\" and a small PDF attachment"],"steps":["Open the bid","Choose Delete bid and documents","Review the impact message and choose Keep it","Choose Delete bid and documents again","Choose Delete bid in the confirmation dialog","Open Bid History"],"expected":"The bid disappears from active bids, its stored document is removed, and a text-only history record remains with the bid title, organisation, deadline, status and deletion date."},
-  {"name":"Protected actions cannot be reached through ordinary editing","viewport":"desktop","covers":["server-side authorization","Applied permission boundary","Declined permission boundary","sensitive role permission boundary","privilege escalation prevention"],"description":"Verifies ordinary editing cannot be used to mark a bid Applied or Declined and non-Super-Admin role managers cannot grant sensitive access-control permissions.","steps":["Sign in as a role without bids.apply or bids.decline and open an open bid","Attempt to change the bid to Applied or Declined through the normal edit flow","Sign in as a non-Super-Admin role manager and attempt to create or edit a role containing users.manage, roles.manage, or settings.manage"],"expected":"The protected workflow transitions and sensitive permission allocation are unavailable or rejected by the backend, while ordinary bid editing remains separate from those privileges."},
-  {"name":"Production errors remain actionable without exposing internals","viewport":"desktop","covers":["server error handling","user-visible error state","safe error messaging","recovery behavior"],"description":"Verifies a simulated server failure is surfaced as a concise user-facing error rather than a blank screen or technical stack trace.","qa_faults":[{"method":"POST","path":"/api/tenders","status":500,"body_json":{"error":"simulated_internal_failure","stack":"SECRET_STACK_TRACE"}}],"steps":["Open Add bid","Enter a valid bid","Submit while the server returns the simulated 500 response"],"expected":"The UI shows a plain-language failure message and does not display the injected stack trace or internal implementation details."}
+  {
+    "name": "First sign-in completes the BidWatch introduction before the workspace",
+    "sanity": true,
+    "viewport": "desktop",
+    "covers": ["Google authentication", "provisioned-user authorization", "first-login onboarding", "onboarding completion persistence", "bid creation"],
+    "description": "Verifies a provisioned user receives a concise first-use introduction, can complete it, and can then use the normal bid workflow.",
+    "steps": ["Sign in with the provisioned Google account for a user who has not completed onboarding", "Review the three-step BidWatch introduction", "Choose Start using BidWatch on the final step", "Open Add bid and create a valid bid titled \"Network Security RFP\"", "Refresh BidWatch"],
+    "expected": "The onboarding dialog is shown only before completion, the user reaches the Dashboard, the bid persists, and the introduction does not reappear after refresh."
+  },
+  {
+    "name": "Bid filters are explicitly labelled and remain usable on mobile",
+    "viewport": "mobile",
+    "covers": ["status filter label", "category filter label", "filtering behavior", "mobile dashboard layout", "text spacing and overflow prevention"],
+    "description": "Verifies the two bid filters identify what they filter instead of presenting ambiguous repeated \"All\" controls, while remaining readable at a narrow viewport.",
+    "steps": ["Open All Bids at 375x667", "Verify one filter is labelled Status and the other is labelled Category", "Open the Status filter and select Reviewing", "Verify only bids in the Reviewing stage remain", "Open the Category filter and select Cybersecurity", "Verify the result list reflects both selected filters", "Increase browser text size or zoom and review the filter controls"],
+    "expected": "The filters have clear labels, their selections work together, and their labels and controls remain readable without clipping or ambiguous duplicate labels."
+  },
+  {
+    "name": "Destructive deletion preserves a text-only bid history record",
+    "viewport": "desktop",
+    "covers": ["bid deletion", "destructive-action confirmation", "bid history archive", "document lifecycle", "GET /api/history"],
+    "description": "Verifies an irreversible bid deletion requires explicit confirmation and preserves the bid metadata after stored documents are removed.",
+    "setup": ["Create a bid titled \"Historical RFP\" with organisation \"Example Org\" and a small PDF attachment"],
+    "steps": ["Open the bid", "Choose Delete bid and documents", "Review the impact message and choose Keep it", "Choose Delete bid and documents again", "Choose Delete bid in the confirmation dialog", "Open Bid History"],
+    "expected": "The bid disappears from active bids, its stored document is removed, and a text-only history record remains with the bid title, organisation, deadline, status and deletion date."
+  },
+  {
+    "name": "Concurrent bid changes and privileged administration remain protected",
+    "viewport": "desktop",
+    "covers": ["optimistic concurrency control", "stale bid update rejection", "server-side authorization", "Applied permission boundary", "Declined permission boundary", "sensitive role permission boundary", "administration destructive confirmation"],
+    "description": "Verifies two users cannot silently overwrite a newer bid revision and privileged administrative operations remain server-enforced and explicitly confirmed.",
+    "steps": ["Actor A and Actor B open the same editable bid before either saves changes", "Actor A saves a status or assignment change", "Actor B attempts to save the stale version of that bid", "Sign in as a role without bids.apply or bids.decline and attempt a protected status transition", "Sign in as a non-Super-Admin role manager and attempt to allocate a sensitive access-control permission", "Open a removable custom role and choose Delete role", "Review the confirmation dialog and choose Keep it"],
+    "expected": "Actor B receives a stale-record conflict instead of overwriting Actor A's change, protected workflow transitions and sensitive permissions are rejected by the backend, and cancelling role deletion leaves the role intact."
+  },
+  {
+    "name": "Production errors remain actionable without exposing internals",
+    "viewport": "desktop",
+    "covers": ["server error handling", "user-visible error state", "safe error messaging", "recovery behavior", "request failure handling"],
+    "description": "Verifies a simulated server failure is surfaced as a concise user-facing error rather than a blank screen or technical stack trace.",
+    "qa_faults": [{"method":"POST","path":"/api/tenders","status":500,"body_json":{"error":"simulated_internal_failure","stack":"SECRET_STACK_TRACE"}}],
+    "steps": ["Open Add bid", "Enter a valid bid", "Submit while the server returns the simulated 500 response"],
+    "expected": "The UI shows a plain-language failure message and does not display the injected stack trace or internal implementation details."
+  }
 ]
