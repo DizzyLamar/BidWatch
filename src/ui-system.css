@@ -18,13 +18,14 @@
   --ui-surface: #ffffff;
   --ui-surface-subtle: #f8fafb;
 }
+
 html { font-size: 16px; }
 body { color: var(--ui-text); font-size: 15px; line-height: 1.5; }
 button, input, select, textarea { min-width: 0; font: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid #526b7b; outline-offset: 2px; }
 .topbar { height: 60px; padding: 0 var(--ui-space-6); }
 .body-shell { min-height: calc(100vh - 60px); }
-.sidebar { width: 224px; padding: var(--ui-space-5) var(--ui-space-3); z-index: 30; }
+.sidebar { width: 224px; padding: var(--ui-space-5) var(--ui-space-3); }
 .main { max-width: 1440px; padding: 28px 32px 40px; }
 .page-head { min-height: 40px; margin-bottom: var(--ui-space-5); align-items: center; }
 .page-head h1 { font-size: 24px; line-height: 1.2; margin: 0 0 6px; }
@@ -56,9 +57,11 @@ td { padding: 16px; line-height: 1.55; vertical-align: middle; }
 td b { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
 td small { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .status, .history-status { min-height: 24px; align-items: center; padding: 4px 8px; border-radius: var(--ui-radius-sm); line-height: 1.2; }
-.toolbar { gap: var(--ui-space-2); margin-bottom: var(--ui-space-4); }
+.toolbar { gap: var(--ui-space-2); margin-bottom: var(--ui-space-4); align-items: end; }
 .search { height: var(--ui-control-h); padding: 0 12px; }
 .toolbar select, .field select, .field input, .field textarea, .apply-box input { min-height: var(--ui-control-h); border-radius: var(--ui-radius-sm); padding-left: 11px; padding-right: 11px; line-height: 1.35; }
+.filter-field { min-width: 170px; display: grid; gap: 6px; }
+.filter-field > span { font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--ui-text-secondary); }
 .field textarea { min-height: 104px; }
 .field { min-width: 0; gap: 7px; }
 .field > span { font-size: 13px; line-height: 1.45; }
@@ -155,8 +158,8 @@ td small { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .storage-note { margin: 0 20px 20px; padding: 15px; line-height: 1.5; }
 .storage-note > div { min-width: 0; }
 .storage-note p { overflow-wrap: anywhere; }
-.top-popover { position: relative; }
-.notification-trigger { position: relative; }
+.top-popover { position:relative; }
+.notification-trigger { position:relative; }
 .notification-count { position:absolute; top:-4px; right:-4px; min-width:18px; height:18px; padding:0 4px; display:grid; place-items:center; border:2px solid #fff; border-radius:999px; background:#263640; color:#fff; font-size:9px; font-style:normal; font-weight:800; line-height:1; }
 .notification-popover { position:absolute; top:46px; right:0; z-index:150; width:min(420px,calc(100vw - 24px)); max-height:min(620px,calc(100vh - 84px)); overflow:auto; background:#fff; border:1px solid #cfd7dc; border-radius:8px; box-shadow:0 16px 44px rgba(15,24,31,.18); }
 .notification-popover-head { display:flex; justify-content:space-between; gap:14px; padding:16px; border-bottom:1px solid #e5e9ec; }
@@ -205,8 +208,9 @@ td small { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .settings-page form .form-actions { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .settings-page form .form-actions > span { color:#68757e; font-size:12px; }
 .mobile-nav-backdrop { position:fixed; inset:56px 0 0; z-index:25; border:0; background:rgba(19,27,34,.32); }
-.onboarding-backdrop { position:fixed; inset:0; z-index:120; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(19,27,34,.52); }
-.onboarding-dialog { width:min(620px,100%); max-height:min(680px,calc(100vh - 48px)); overflow:auto; background:#fff; border:1px solid #cfd7dc; border-radius:10px; box-shadow:0 20px 60px rgba(15,24,31,.24); }
+.sidebar { z-index:30; }
+.onboarding-backdrop { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(19,27,34,.52); }
+.onboarding-dialog { width: min(620px,100%); max-height: min(680px,calc(100vh - 48px)); overflow: auto; background:#fff; border:1px solid #cfd7dc; border-radius:10px; box-shadow:0 20px 60px rgba(15,24,31,.24); }
 .onboarding-progress { display:flex; gap:6px; padding:18px 22px 0; }
 .onboarding-progress span { height:4px; flex:1; border-radius:3px; background:#e5e9ec; }
 .onboarding-progress span.active,.onboarding-progress span.complete { background:#435867; }
@@ -220,7 +224,6 @@ td small { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .onboarding-actions > div { display:flex; gap:10px; }
 .onboarding-actions button { min-width:100px; }
 .onboarding-actions .text-btn { min-width:auto; }
-.drawer-backdrop, .modal-backdrop, .admin-detail-backdrop, .onboarding-backdrop { isolation:isolate; }
 @media (max-width:850px) {
   .main { padding:22px 16px 32px; }
   .admin-head { align-items:flex-start; }
@@ -229,13 +232,15 @@ td small { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 }
 @media (max-width:600px) {
   body { font-size:16px; }
+  .mobile-nav-backdrop { inset:56px 0 0; z-index:25; }
+  .sidebar { z-index:30; }
   .topbar { height:56px; padding:0 12px; }
   .body-shell { min-height:calc(100vh - 56px); }
-  .sidebar { top:56px; z-index:30; }
-  .mobile-nav-backdrop { inset:56px 0 0; z-index:25; }
+  .sidebar { top:56px; }
   .main { padding:18px 12px 28px; }
   .page-head { display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:16px; }
   .page-head > .primary { width:100%; }
+  .filter-field { min-width: 0; }
   .panel-head { min-height:auto; padding:16px; align-items:flex-start; }
   .form { padding:16px; }
   .form-grid { gap:16px; }
@@ -287,3 +292,6 @@ td small { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior:auto !important; transition-duration:.01ms !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; }
 }
+
+/* Popup layering contract: overlays sit behind the active popup/drawer, never in front of it. */
+.drawer-backdrop, .modal-backdrop, .admin-detail-backdrop, .onboarding-backdrop { isolation:isolate; }
