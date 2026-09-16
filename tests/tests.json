@@ -1,46 +1,7 @@
 [
-  {
-    "name": "Provisioned Google user can create and retain a bid",
-    "sanity": true,
-    "viewport": "desktop",
-    "covers": ["Google authentication", "provisioned-user authorization", "bid creation", "database create/read", "KPI overview"],
-    "description": "Verifies an authorized Google identity can enter BidWatch, create a bid and see the resulting operational dashboard.",
-    "steps": ["Sign in with the provisioned Google account", "Open Add bid and enter title \"Network Security RFP\", organisation \"Example Org\", and a deadline 10 days in the future", "Save the bid", "Return to Dashboard"],
-    "expected": "The provisioned user enters BidWatch, the bid persists, and permitted KPI cards are visible without exposing restricted administration metrics."
-  },
-  {
-    "name": "Destructive deletion preserves a text-only bid history record",
-    "viewport": "desktop",
-    "covers": ["bid deletion", "destructive-action confirmation", "bid history archive", "document lifecycle"],
-    "description": "Verifies an irreversible bid deletion requires explicit confirmation and preserves the bid metadata after stored documents are removed.",
-    "setup": ["Create a bid titled \"Historical RFP\" with organisation \"Example Org\" and a small PDF attachment"],
-    "steps": ["Open the bid", "Choose Delete bid and documents", "Review the impact message and choose Keep it", "Choose Delete bid and documents again", "Choose Delete bid in the confirmation dialog", "Open Bid History"],
-    "expected": "The bid disappears from active bids, its stored document is removed, and a text-only history record remains with the bid title, organisation, deadline, status and deletion date."
-  },
-  {
-    "name": "Protected workflow transitions require their own permissions",
-    "viewport": "desktop",
-    "covers": ["server-side authorization", "privilege escalation prevention", "Applied permission boundary", "Declined permission boundary"],
-    "description": "Verifies ordinary bid editing cannot bypass dedicated Applied or Declined permissions.",
-    "setup": ["Create an open bid while signed in as an authorized bid contributor"],
-    "steps": ["Sign in as a role without bids.apply or bids.decline", "Open the bid", "Attempt to change its status to Applied or Declined through the normal application flow"],
-    "expected": "The protected transitions are unavailable or rejected by the backend; ordinary edit permission cannot elevate into submission authority."
-  },
-  {
-    "name": "Sensitive roles cannot be self-escalated",
-    "viewport": "desktop",
-    "covers": ["role assignment authorization", "vertical privilege escalation prevention", "sensitive permission protection"],
-    "description": "Verifies non-Super-Admin access managers cannot grant sensitive access-control permissions.",
-    "steps": ["Sign in as a non-Super-Admin user with role-management capability", "Create or edit a custom role and attempt to include users.manage, roles.manage, or settings.manage", "Attempt to assign a sensitive role"],
-    "expected": "The backend rejects sensitive permission allocation or assignment and the protected Super Admin remains the only authority for sensitive access."
-  },
-  {
-    "name": "Production errors are actionable without exposing internals",
-    "viewport": "mobile",
-    "covers": ["server error handling", "user-visible error state", "safe error messaging", "recovery behavior"],
-    "description": "Verifies a simulated server failure is surfaced as a concise user-facing error rather than a blank screen or technical stack trace.",
-    "qa_faults": [{"method":"POST","path":"/api/tenders","status":500,"body_json":{"error":"simulated_internal_failure","stack":"SECRET_STACK_TRACE"}}],
-    "steps": ["Open Add bid", "Enter a valid bid", "Submit while the server returns the simulated 500 response"],
-    "expected": "The UI shows a plain-language failure message and does not display the injected stack trace or internal implementation details."
-  }
+  {"name":"First sign-in completes the BidWatch introduction before the workspace","sanity":true,"viewport":"desktop","covers":["Google authentication","provisioned-user authorization","first-login onboarding","onboarding completion persistence","bid creation"],"description":"Verifies a provisioned user receives a concise first-use introduction, can complete it, and can then use the normal bid workflow.","steps":["Sign in with the provisioned Google account for a user who has not completed onboarding","Review the three-step BidWatch introduction","Choose Start using BidWatch on the final step","Open Add bid and create a valid bid titled \"Network Security RFP\"","Refresh BidWatch"],"expected":"The onboarding dialog is shown only before completion, the user reaches the Dashboard, the bid persists, and the introduction does not reappear after refresh."},
+  {"name":"Dashboard deadline cards remain readable at mobile width","viewport":"mobile","covers":["mobile dashboard layout","My deadlines readability","Unassigned bids readability","text spacing and overflow prevention"],"description":"Verifies the Dashboard remains readable for users who need larger text and narrow screens.","steps":["Sign in as a role that can see personal and team deadline summaries","Open Dashboard at 375x667","Review My deadlines and Unassigned bids cards","Increase browser text size or zoom and review the same cards"],"expected":"Card text has visible spacing from borders, remains readable without clipping, and the cards reflow without losing their labels or actions."},
+  {"name":"Destructive deletion preserves a text-only bid history record","viewport":"desktop","covers":["bid deletion","destructive-action confirmation","bid history archive","document lifecycle","GET /api/history"],"description":"Verifies an irreversible bid deletion requires explicit confirmation and preserves the bid metadata after stored documents are removed.","setup":["Create a bid titled \"Historical RFP\" with organisation \"Example Org\" and a small PDF attachment"],"steps":["Open the bid","Choose Delete bid and documents","Review the impact message and choose Keep it","Choose Delete bid and documents again","Choose Delete bid in the confirmation dialog","Open Bid History"],"expected":"The bid disappears from active bids, its stored document is removed, and a text-only history record remains with the bid title, organisation, deadline, status and deletion date."},
+  {"name":"Protected actions cannot be reached through ordinary editing","viewport":"desktop","covers":["server-side authorization","Applied permission boundary","Declined permission boundary","sensitive role permission boundary","privilege escalation prevention"],"description":"Verifies ordinary editing cannot be used to mark a bid Applied or Declined and non-Super-Admin role managers cannot grant sensitive access-control permissions.","steps":["Sign in as a role without bids.apply or bids.decline and open an open bid","Attempt to change the bid to Applied or Declined through the normal edit flow","Sign in as a non-Super-Admin role manager and attempt to create or edit a role containing users.manage, roles.manage, or settings.manage"],"expected":"The protected workflow transitions and sensitive permission allocation are unavailable or rejected by the backend, while ordinary bid editing remains separate from those privileges."},
+  {"name":"Production errors remain actionable without exposing internals","viewport":"desktop","covers":["server error handling","user-visible error state","safe error messaging","recovery behavior"],"description":"Verifies a simulated server failure is surfaced as a concise user-facing error rather than a blank screen or technical stack trace.","qa_faults":[{"method":"POST","path":"/api/tenders","status":500,"body_json":{"error":"simulated_internal_failure","stack":"SECRET_STACK_TRACE"}}],"steps":["Open Add bid","Enter a valid bid","Submit while the server returns the simulated 500 response"],"expected":"The UI shows a plain-language failure message and does not display the injected stack trace or internal implementation details."}
 ]
