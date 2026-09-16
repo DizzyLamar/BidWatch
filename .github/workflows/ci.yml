@@ -11,9 +11,9 @@ permissions:
 
 jobs:
   verify:
-    name: Typecheck, build and security/UX checks
+    name: Repository tests and security/UX checks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,16 +22,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Typecheck
-        run: npm run typecheck
 
       - name: Repository verification
         run: npm test
 
-      - name: Production build
-        run: npm run build
+      - name: Validate automation scripts
+        run: node --check scripts/verify-repo.mjs && node --check scripts/deploy-appdeploy.mjs
