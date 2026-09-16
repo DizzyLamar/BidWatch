@@ -1,0 +1,14 @@
+{
+  "methods": ["google", "apple", "x"],
+  "headline": "Sign in to BidWatch",
+  "subtitle": "Use your company account to access the internal bid tracker.",
+  "style": {
+    "mode": "light",
+    "accentColor": "#17202a",
+    "backgroundColor": "#f5f7f9",
+    "panelColor": "#ffffff",
+    "textColor": "#17202a",
+    "fontFamily": "Inter, system-ui, sans-serif",
+    "borderRadius": 8
+  }
+}
