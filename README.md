@@ -1,80 +1,111 @@
 # BidWatch
 
-Internal bid/tender tracking system for an ICT and cybersecurity team.
+Internal bid and tender tracking system for an ICT and cybersecurity team.
 
-BidWatch is designed around a simple principle: **every opportunity should be discoverable, owned, auditable, deadline-aware and recoverable from mistakes.**
+BidWatch gives the team one controlled workspace for procurement opportunities, ownership, deadlines, documents, workflow state, submissions and audit history.
 
 ## Product scope
 
-BidWatch tracks the full bid lifecycle:
+BidWatch tracks these workflow states:
 
-`Found/New → Reviewing → Pursuing → Preparing → Ready to Submit → Applied`
+- New
+- Reviewing
+- Pursuing
+- Preparing
+- Ready to Submit
+- Applied
+- Declined
 
-A bid can also be closed as `Declined`.
-
-Core capabilities:
+Core capabilities include:
 
 - Provisioned Google authentication.
 - Server-enforced role-based access control.
 - Permission-specific workflow actions.
 - Bid assignment and ownership.
 - Deadline urgency and scheduled reminders.
-- Search and filtering.
+- Explicitly labelled status and category filters.
 - Managed document uploads and deletion.
 - Activity history and security audit history.
-- Role-allocated KPI visibility.
-- Text-only Bid History for bids removed from the active workspace.
-- Production-oriented error and destructive-action UX.
+- Permission-controlled KPI visibility.
+- Text-only Bid History for removed bids.
+- Accessible destructive-action confirmations.
+- Production error and recovery states.
+- Short-lived client caching and request deduplication for high-frequency reads.
+- Optimistic concurrency protection for shared bid records.
 
 ## Architecture
 
-```text
-Google identity
-      ↓
-Provisioned BidWatch user
-      ↓
-Role
-      ↓
-Permissions
-      ↓
-Frontend → authenticated API → database / managed storage
-```
+The application separates identity, authorization, application logic and persistence.
 
-Frontend: React + Vite + TypeScript + Tailwind CSS.
+**Authentication**
 
-Backend: AppDeploy router + database + managed storage.
+Google authenticates the person. BidWatch then checks the authenticated identity against its provisioned-user records.
 
-Application storage is isolated behind `backend/storage.ts` so the business logic is not tied directly to one object-storage provider.
+**Authorization**
+
+The authenticated BidWatch user receives a role. The role determines the permissions available to the user. Sensitive permissions remain restricted to the protected Super Admin identity.
+
+**Application**
+
+The React frontend calls authenticated AppDeploy API routes. The backend validates authorization and input before changing application state. Database records and managed object storage are accessed through the backend.
+
+Frontend: React, Vite, TypeScript and Tailwind CSS.
+
+Backend: AppDeploy router, database and managed storage.
+
+Object storage is isolated behind `backend/storage.ts` so business logic does not depend directly on one storage implementation.
 
 The application currently uses hash routing because the deployed SPA environment does not require server-side route rewrites.
 
+## Request handling
+
+BidWatch treats request volume as a production concern rather than assuming the application will always have a small number of users.
+
+Authenticated GET requests that are safe to cache use a short in-memory cache in `src/api-cache.ts`. Each cached request has a deliberately small time-to-live. Concurrent callers for the same URL share the same in-flight promise, preventing duplicate requests during simultaneous renders or refreshes.
+
+Mutations invalidate affected cache entries before the workspace is refreshed. The main refresh operation also coalesces simultaneous refresh calls so several UI events cannot create a burst of identical requests.
+
+The cache is process-local to the browser session. It is cleared on sign-out and is never used as an authorization source. The server remains the source of truth.
+
+Administrative data uses a longer read cache because roles, categories and user access records change less frequently. Bid lists, KPIs and notifications use shorter windows because users expect them to reflect current work.
+
+## Shared-record consistency
+
+Bid records include a server-managed `revision` value.
+
+When a user edits a bid, applies it or declines it, the client sends the revision it originally read. The server compares that value with the current stored revision. A mismatch returns HTTP 409 instead of silently overwriting another user's newer change. Successful writes increment the revision.
+
+This is optimistic concurrency control. It is intended to protect shared procurement records when two team members have the same bid open at the same time.
+
+The server does not trust hidden fields, disabled controls or client-side workflow state for authorization. Every state-changing endpoint validates permissions and business rules again on the server.
+
 ## Authentication and authorization
 
-Authentication and authorization are deliberately separate.
+Authentication and authorization are separate concerns.
 
-1. An administrator provisions a user's Google email in BidWatch and assigns a role.
-2. The user selects Google sign-in.
-3. Google authenticates the user using their normal Google credentials and MFA where configured.
+1. An administrator provisions a user's Google email and assigns a BidWatch role.
+2. The user signs in through Google.
+3. Google handles the user's credentials and configured MFA.
 4. BidWatch receives the authenticated identity, not the Google password.
-5. BidWatch checks the identity against the provisioned-user table.
-6. The assigned role determines the user's permissions.
-7. Suspended, inactive, unprovisioned or identity-mismatched users are denied application access.
+5. BidWatch checks that identity against its provisioned-user records.
+6. The user's role determines the effective permissions.
+7. Suspended, inactive, unprovisioned and identity-mismatched users are denied application access.
 
 The protected Super Admin identity is `ddzinja@gmail.com`.
 
-Sensitive access-control permissions include user management, role management, system settings, security-audit access and privileged KPI/storage views. Ordinary role managers cannot allocate sensitive permissions to themselves or others.
+Sensitive permissions include user management, role management, system settings, security-audit access and privileged KPI/storage views. Ordinary role managers cannot allocate sensitive permissions to themselves or other users.
 
 ## Security controls
 
-BidWatch follows a deny-by-default, least-privilege model.
+BidWatch uses deny-by-default authorization and least privilege.
 
 Implemented controls include:
 
 - Server-side authorization on sensitive operations.
-- Dedicated permissions for `Applied`, `Declined` and deletion actions.
+- Dedicated permissions for Applied, Declined and deletion actions.
 - Object-level checks for bids, attachments and notifications.
 - Server-side input length validation.
-- HTTP/HTTPS URL allowlisting.
+- HTTP and HTTPS URL allowlisting.
 - Active-assignee validation.
 - Protected Super Admin handling.
 - Protection against suspended-user auto-reactivation.
@@ -83,14 +114,14 @@ Implemented controls include:
 - Attachment metadata cleanup when storage writes fail.
 - Storage orphan detection and privileged cleanup.
 - Security activity logging for access-control changes.
-- No raw HTML rendering in the React UI.
-- Repository regression checks for common XSS/unsafe-UI patterns.
+- React's normal escaped rendering without raw HTML injection.
+- Repository regression checks for unsafe HTML and native browser confirmation patterns.
 
-Security is defense-in-depth, not a claim that the application is vulnerability-free. Before wider production use, continue independent security review, dependency review, file-content/magic-byte validation and malware scanning/CDR for uploaded documents.
+These controls are defense in depth. They are not a claim that the application is vulnerability-free. Before wider production use, continue independent security review, dependency review, file-content and magic-byte validation, and malware scanning or content disarm and reconstruction for uploaded documents.
 
 ## Bid deletion and history
 
-Deleting a bid is intentionally different from deleting a document.
+Deleting a document and deleting a bid are different operations.
 
 ### Delete a document
 
@@ -102,16 +133,20 @@ Deleting a bid is intentionally different from deleting a document.
 ### Delete a bid
 
 - Requires the bid-delete permission.
-- Shows the exact bid being removed and its consequences.
-- Archives the bid's text metadata into `bid_history` before removing the active record.
+- Identifies the exact bid and explains the consequences.
+- Creates a text-only history snapshot before deleting the active record.
 - Removes stored documents only after the history snapshot succeeds.
-- Leaves a text-only record in **Bid History**.
+- Leaves the historical record in Bid History.
 
-The history record is deliberately independent of the document objects, so deleting the PDF/DOCX/etc. does not erase the fact that the opportunity existed or the key information about it.
+The history record is independent of document storage, so removing a PDF, DOCX or other attachment does not erase the procurement record.
 
 ## UX rules
 
-BidWatch uses consequence-based interaction patterns rather than generic browser alerts.
+BidWatch uses explicit, task-specific controls rather than generic browser prompts.
+
+### Filters
+
+Every filter has a visible field label. The default options are written as `All statuses` and `All categories`, so the meaning of each control remains clear even when several filters appear together.
 
 ### Destructive actions
 
@@ -121,176 +156,113 @@ Use a confirmation dialog for irreversible deletion. The dialog must:
 - Explain what will be removed.
 - Explain what will remain.
 - Use an explicit destructive action label such as `Delete bid` or `Delete document`.
-- Keep the non-destructive option visually distinct.
-- Never rely on a generic `Are you sure?` message.
-
-Routine actions should not be overloaded with confirmations.
+- Provide a clear non-destructive option.
+- Prevent duplicate submission while the operation is running.
+- Never rely on a generic browser `confirm()` dialog.
 
 ### Errors
 
-Errors should:
+Errors should appear close to the failed task where possible. Messages use plain language, avoid implementation details and provide a recovery path when one exists. Stack traces, database errors and internal service details are never presented as user-facing copy.
 
-- Appear close to the failed task where possible.
-- Use plain language.
-- Explain what happened without exposing implementation details.
-- Give the user a recovery path when one exists.
-- Avoid stack traces, database errors and internal service details.
-- Use stronger visual treatment only when the error actually blocks progress.
-
-Form validation is inline. Save/delete operations use disabled states to prevent duplicate submissions. Application-load failures have a dedicated recovery state with a retry action.
+Save and deletion operations use disabled states while requests are running. Application-load failures have a dedicated recovery state with a retry action.
 
 ## KPI model
 
 KPI visibility is permission-driven.
 
-Available groups:
+Available groups include:
 
-- Portfolio.
-- Pipeline.
-- Deadline risk.
-- Submissions.
-- Personal workload.
-- Team workload.
-- Access posture.
-- Storage health.
+- Portfolio
+- Pipeline
+- Deadline risk
+- Submissions
+- Personal workload
+- Team workload
+- Access posture
+- Storage health
 
-The backend only returns KPI sections allowed by the authenticated user's role.
+The backend returns only the KPI sections allowed by the authenticated user's role.
 
 ## Testing strategy
 
-BidWatch uses two layers of automated verification.
+BidWatch uses repository CI and deployed black-box QA.
 
 ### Repository CI
 
-GitHub Actions runs on pull requests and pushes to `main`:
+GitHub Actions runs on pull requests and pushes to `main`.
 
-1. Install dependencies.
-2. Typecheck the TypeScript project.
-3. Run `npm test`.
-4. Build the production frontend.
+The pipeline installs dependencies, typechecks the project, runs `npm test` and builds the production frontend.
 
-`npm test` runs `scripts/verify-repo.mjs`, which checks:
+`npm test` runs `scripts/verify-repo.mjs`. The repository verification checks the AppDeploy test suite, security-sensitive backend routes, bid-history support, managed storage deletion, unsafe HTML patterns, native browser confirmations and required production error styling.
 
-- AppDeploy test-suite structure.
-- Exactly one sanity test.
-- Required security-sensitive backend routes and permissions.
-- Bid-history support.
-- Managed storage deletion.
-- Absence of common raw-HTML/XSS patterns.
-- Absence of native browser confirmation dialogs.
-- Required production error/confirmation styling.
+### AppDeploy QA
 
-### AppDeploy black-box QA
+`tests/tests.json` defines user-visible workflows for deployed QA. Current coverage includes first-login onboarding, labelled filters at mobile width, destructive deletion and history, concurrent bid edits, privileged workflow boundaries and production error handling.
 
-`tests/tests.json` defines user-visible workflows for AppDeploy's deployed QA layer. It covers authentication, bid creation, destructive deletion/history, authorization boundaries and production error handling.
-
-A successful local build is not considered sufficient evidence that the deployed application works. The live application should also be reviewed through AppDeploy QA and runtime status.
+A successful local build is not treated as sufficient evidence that the deployed application works. Runtime status and black-box QA are part of the definition of done.
 
 ## Development workflow
 
-Use this workflow for every feature or significant fix:
+For every feature or significant fix:
 
-```text
-1. Define the user outcome
-        ↓
-2. Identify permissions + security impact
-        ↓
-3. Identify UX states
-   happy / validation / loading / empty / error / destructive
-        ↓
-4. Write or update tests
-        ↓
-5. Implement backend authorization + data lifecycle
-        ↓
-6. Implement frontend workflow + recovery states
-        ↓
-7. Run typecheck + repository tests + production build
-        ↓
-8. Deploy to AppDeploy
-        ↓
-9. Review runtime errors + black-box QA
-        ↓
-10. Fix → redeploy → re-test
-        ↓
-11. Commit to GitHub
-        ↓
-12. Merge to main only when CI passes
-```
+1. Define the user outcome.
+2. Identify permissions and security impact.
+3. Identify loading, empty, validation, success, error and destructive states.
+4. Write or update tests.
+5. Implement backend authorization and data lifecycle rules.
+6. Implement the frontend workflow and recovery states.
+7. Run typecheck, repository tests and the production build.
+8. Deploy to AppDeploy.
+9. Review runtime errors and black-box QA.
+10. Fix and redeploy if required.
+11. Synchronize the deployed application source into GitHub.
+12. Merge to `main` only after CI passes.
 
-### Definition of Done
+### Definition of done
 
-A feature is not complete until:
+A feature is complete only when:
 
 - The user-visible workflow works.
 - Backend authorization is enforced independently of the UI.
 - Invalid input is rejected safely.
 - Loading, empty, success and failure states are handled.
-- Destructive actions have appropriate confirmation/recovery.
-- Relevant activity/audit history exists.
+- Destructive actions have appropriate confirmation and recovery behavior.
+- Relevant activity or audit history exists.
 - Existing data is not accidentally destroyed.
-- Automated tests cover the changed behavior.
+- Relevant automated tests cover the changed behavior.
 - `npm run typecheck` passes.
 - `npm test` passes.
 - `npm run build` passes.
-- AppDeploy deployment is ready with no reported frontend/backend runtime errors.
-- The deployed behavior has been reviewed.
+- AppDeploy reports a ready deployment with no frontend or backend runtime errors.
+- GitHub contains the same application source used by the deployment.
 
 ## Git workflow
 
-Recommended branch model:
+Use focused feature or fix branches and merge through pull requests.
 
-```text
-main
- ↑
-Pull Request
- ↑
-feature/<short-description>
-```
+Recommended commit prefixes:
 
-Examples:
+- `feat:` product functionality.
+- `fix:` defects.
+- `security:` security hardening.
+- `test:` automated coverage.
+- `docs:` documentation.
+- `chore:` tooling, CI or dependencies.
+- `refactor:` behavior-preserving architecture changes.
 
-- `feature/bid-history`
-- `fix/delete-confirmation`
-- `security/attachment-validation`
-- `chore/ci-pipeline`
-
-Keep commits focused. Prefer:
-
-- `feat:` for product functionality.
-- `fix:` for defects.
-- `security:` for security hardening.
-- `test:` for automated coverage.
-- `docs:` for documentation.
-- `chore:` for tooling/CI/dependencies.
-- `refactor:` for behavior-preserving architecture changes.
+GitHub is the source-control record. The AppDeploy source must be synchronized before a change is considered complete.
 
 ## Continuous integration and deployment
 
-### CI
-
 `.github/workflows/ci.yml` runs automatically for pull requests and pushes to `main`.
 
-### Production deployment
+`.github/workflows/deploy.yml` runs after pushes to `main` and can also be triggered manually.
 
-`.github/workflows/deploy.yml` runs after a push to `main` or manually through GitHub Actions.
+The deployment workflow repeats the critical verification steps and then calls AppDeploy through `scripts/deploy-appdeploy.mjs`.
 
-It repeats the critical verification steps and then calls AppDeploy through `scripts/deploy-appdeploy.mjs`.
+The workflow requires the `APPDEPLOY_API_KEY` GitHub Actions secret. The key must never be committed to the repository or included in application source.
 
-The deployment workflow requires a GitHub Actions secret:
-
-`APPDEPLOY_API_KEY`
-
-The key should be created through AppDeploy's API-key flow and stored only as a GitHub Actions secret. Never commit it to the repository.
-
-The deployment script:
-
-- Detects application files changed in the commit.
-- Sends only relevant application files/deletions to AppDeploy.
-- Polls deployment status.
-- Fails the workflow if deployment fails or runtime errors are reported.
-- Prevents overlapping production deployments with a GitHub Actions concurrency group.
-
-AppDeploy currently provides the hosted runtime, database, storage, authentication and black-box QA layer. GitHub Actions is the source-control CI/CD control plane.
+The deployment script detects changed application files, sends the relevant application changes to AppDeploy, polls deployment status and fails when deployment fails or runtime errors are reported. Production deployments use a GitHub Actions concurrency group to prevent overlapping deployments.
 
 ## Local development
 
@@ -307,33 +279,25 @@ npm test
 npm run build
 ```
 
-## Deployment notes
-
-The production application is currently hosted through AppDeploy.
+## Production
 
 Live application:
 
 `https://bidwatch-q2u0th.v2.appdeploy.ai/`
 
-The AppDeploy MCP workflow also maintains deployment versions and supports rollback when required.
+AppDeploy provides the hosted runtime, database, storage, authentication and deployed QA layer. GitHub provides source control and CI/CD.
 
-## Repository security
-
-BidWatch contains internal security architecture and application code. The repository should be **private** before it is used as a real company source repository. If it remains public during development, do not commit credentials, secrets, production data, customer documents or sensitive infrastructure details.
+The repository should be private before BidWatch is used as a real company source repository. Never commit credentials, production data, customer documents or sensitive infrastructure details.
 
 ## Future hardening
 
-Priorities for future iterations:
+Priorities as usage grows:
 
-1. File magic-byte/signature validation.
-2. Malware scanning/CDR for uploaded documents.
-3. Server-side pagination and indexed search as volume grows.
-4. Stronger audit viewer and access-review workflow.
-5. Email/WhatsApp deadline notifications where appropriate.
-6. Saved filters and bulk operations with careful authorization.
-7. Automated dependency/security scanning in CI.
-8. Independent penetration testing before exposing BidWatch beyond the internal team.
-
-## Current AppDeploy snapshot
-
-The live source is maintained separately from GitHub and should be synchronized deliberately. The deployed snapshot is the runtime source of truth for AppDeploy; GitHub is the source-control record.
+1. Server-side pagination and indexed search for large bid volumes.
+2. File magic-byte validation.
+3. Malware scanning or content disarm and reconstruction for uploaded documents.
+4. Stronger audit review and access-review workflows.
+5. Transactional email and approved messaging notifications.
+6. Saved filters and carefully authorized bulk operations.
+7. Automated dependency and security scanning in CI.
+8. Independent penetration testing before exposure outside the internal team.
