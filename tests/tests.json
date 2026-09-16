@@ -9,12 +9,12 @@
     "expected": "The onboarding dialog is shown only before completion, the user reaches the Dashboard, the bid persists, and the introduction does not reappear after refresh."
   },
   {
-    "name": "Bid filters are explicitly labelled and remain usable on mobile",
+    "name": "Bid filters, Insights visualization, and responsive layout remain clear on mobile",
     "viewport": "mobile",
-    "covers": ["status filter label", "category filter label", "filtering behavior", "mobile dashboard layout", "text spacing and overflow prevention"],
-    "description": "Verifies the two bid filters identify what they filter instead of presenting ambiguous repeated \"All\" controls, while remaining readable at a narrow viewport.",
-    "steps": ["Open All Bids at 375x667", "Verify one filter is labelled Status and the other is labelled Category", "Open the Status filter and select Reviewing", "Verify only bids in the Reviewing stage remain", "Open the Category filter and select Cybersecurity", "Verify the result list reflects both selected filters", "Increase browser text size or zoom and review the filter controls"],
-    "expected": "The filters have clear labels, their selections work together, and their labels and controls remain readable without clipping or ambiguous duplicate labels."
+    "covers": ["status filter label", "category filter label", "filtering behavior", "Insights pipeline chart", "mobile dashboard layout", "text spacing and overflow prevention"],
+    "description": "Verifies bid filters identify what they filter, the Insights page provides a useful visual pipeline representation, and dense content remains readable at a narrow viewport.",
+    "steps": ["Open All Bids at 375x667", "Verify one filter is labelled Status and the other is labelled Category", "Open the Status filter and select Reviewing", "Open the Category filter and select Cybersecurity", "Verify the result list reflects both selected filters", "Open Insights and review Bids by stage and Upcoming deadlines", "Increase browser text size or zoom and review the page"],
+    "expected": "The filters are clearly labelled and usable, Insights contains a visible workflow-distribution chart and deadline analysis, and the interface remains readable without clipping or overcrowding."
   },
   {
     "name": "Destructive deletion preserves a text-only bid history record",
