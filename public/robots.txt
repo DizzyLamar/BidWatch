@@ -1,0 +1,6 @@
+# BidWatch is an authenticated internal application. Keep workspace data out of search.
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://bidwatch-q2u0th.v2.appdeploy.ai/sitemap.xml
