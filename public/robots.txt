@@ -1,4 +1,5 @@
 # BidWatch is an authenticated internal application. Keep workspace data out of search.
+# Procurement discovery is an in-app workflow; private bid records remain non-indexable.
 User-agent: *
 Allow: /
 Disallow: /api/
