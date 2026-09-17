@@ -4,6 +4,7 @@ import App from './App';
 import './index.css';
 import './ui-system.css';
 import './kpi.css';
+import './seo';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
