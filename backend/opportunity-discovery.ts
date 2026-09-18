@@ -183,7 +183,7 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
       body: JSON.stringify({ skip: 0, take: 250 }),
     });
     const items = Array.isArray(index?.items) ? index.items : [];
-    const details = await Promise.all(items.slice(0, 120).map(async item => {
+    const details = await Promise.all(items.slice(0, 120).map(async (item: any) => {
       const ocid = text(item?.ocid);
       if (!ocid) return null;
       try {
