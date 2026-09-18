@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+const env = (import.meta as any).env || {};
+const SUPABASE_URL = env.VITE_SUPABASE_URL as string | undefined;
+const SUPABASE_PUBLISHABLE_KEY = env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
 
 if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
   console.warn('BidWatch auth is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.');
