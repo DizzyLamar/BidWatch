@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Database, HardDrive, KeyRound, Plus, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
-import { api } from '@appdeploy/client';
+import { api } from './platform';
 
 type PermissionMeta = { key: string; label: string; group: string; description: string };
 type Role = { id: string; name: string; description: string; permissions: string[]; system: boolean };
