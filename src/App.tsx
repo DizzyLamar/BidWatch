@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '@appdeploy/client';
-import { auth } from '@appdeploy/client';
+import { api, auth } from './platform';
 import {
   Archive,
   Bell,
@@ -280,7 +279,7 @@ export default function App() {
           setPermissionMeta(access.permissions);
         }
       } catch (e: any) {
-        const message = e?.status === 402 ? 'BidWatch backend access is temporarily unavailable. The AppDeploy service is returning Payment Required; no workspace data was changed.' : e?.status >= 500 ? 'BidWatch is temporarily unavailable. Please try again.' : e?.message || 'Could not load BidWatch.';
+        const message = e?.status >= 500 ? 'BidWatch is temporarily unavailable. Please try again.' : e?.message || 'Could not load BidWatch.';
         setLoadError(message);
         showNotice(message, 'error');
       } finally {
@@ -297,10 +296,13 @@ export default function App() {
   }
   useEffect(() => {
     (async () => {
-      if (auth.isSignedIn()) {
+      try {
         const u = await auth.getUser();
-        setUser(u);
-      } else setLoading(false);
+        if (u) setUser(u);
+        else setLoading(false);
+      } catch {
+        setLoading(false);
+      }
     })();
   }, []);
   useEffect(() => {
@@ -340,10 +342,7 @@ export default function App() {
 
   async function signIn() {
     try {
-      const result = await auth.signIn({
-        scope: 'openid email profile offline_access',
-      });
-      setUser(result.user);
+      await auth.signIn();
     } catch (e: any) {
       setNotice(
         e?.code === 'popup_blocked'
