@@ -280,7 +280,7 @@ export default function App() {
           setPermissionMeta(access.permissions);
         }
       } catch (e: any) {
-        const message = e?.status >= 500 ? 'BidWatch is temporarily unavailable. Please try again.' : e?.message || 'Could not load BidWatch.';
+        const message = e?.status === 402 ? 'BidWatch backend access is temporarily unavailable. The AppDeploy service is returning Payment Required; no workspace data was changed.' : e?.status >= 500 ? 'BidWatch is temporarily unavailable. Please try again.' : e?.message || 'Could not load BidWatch.';
         setLoadError(message);
         showNotice(message, 'error');
       } finally {
@@ -1410,7 +1410,7 @@ function TenderDrawer({
             >
               {tender.status}
             </span>
-            <h2>{tender.title}</h2>
+            <h2 id="bid-detail-title">{tender.title}</h2>
             <p>
               {tender.organisation}
               {tender.reference ? ` · ${tender.reference}` : ''}
