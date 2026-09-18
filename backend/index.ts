@@ -117,7 +117,7 @@ interface User { id: string; userId?: string; email: string; name: string; roleI
 interface Tender { id: string; title: string; organisation: string; reference: string; description: string; deadline: string; source: string; url: string; category: string; status: string; assigneeId: string; submittedBy: string; submittedAt: string; notes: string; revision?: number; submissionReference?: string; appliedBy?: string; appliedAt?: string }
 interface BidHistory { id: string; originalTenderId: string; title: string; organisation: string; reference: string; description: string; deadline: string; source: string; url: string; category: string; status: string; assigneeId: string; submittedBy: string; submittedAt: string; notes: string; submissionReference?: string; appliedBy?: string; appliedAt?: string; deletedBy: string; deletedAt: string; attachmentCount: number }
 
-const OPPORTUNITY_SOURCES = [
+const OPPORTUNITY_SOURCES_UNUSED = [
   { id: 'pppc', name: 'PPPC procurement adverts', url: 'https://www.pppc.mw/procurement/adverts', kind: 'public' },
   { id: 'ppda', name: 'PPDA procurement notices', url: 'https://ppda.mw/tenders', kind: 'public' },
   { id: 'maneps', name: 'MANEPS procurement notices', url: 'https://maneps.mw/procurement-notice', kind: 'portal' },
@@ -135,7 +135,7 @@ const OPPORTUNITY_TERMS = [
   'request for quotation', 'request for proposals', 'tender'
 ];
 
-function opportunityMatch(textValue: string) {
+function opportunityMatch_UNUSED(textValue: string) {
   const haystack = textValue.toLowerCase();
   return OPPORTUNITY_TERMS.filter(term => haystack.includes(term)).slice(0, 12);
 }
@@ -213,7 +213,7 @@ async function storageStats() {
 }
 
 function kpiPermissionForSection(section: string): Permission { return `kpis.view.${section}` as Permission; }
-async function buildKpis(ctx: RouterContext, u: Awaited<ReturnType<typeof currentUser>>) {
+async function buildKpis(_ctx: RouterContext, u: Awaited<ReturnType<typeof currentUser>>) {
   const tenders = await listAll<Tender>('tenders');
   const result: Record<string, unknown> = {};
   const active = tenders.filter(t => !['Applied', 'Declined'].includes(t.status));
