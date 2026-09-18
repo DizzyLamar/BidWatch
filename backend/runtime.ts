@@ -112,7 +112,7 @@ export const db = {
     const inserted = await checked<Array<{ id: string }>>(result);
     return inserted.map(row => row.id);
   },
-  async update(table: string, updates: Array<{ id: string; record: Record<string, unknown> }>) {
+  async update(table: string, updates: Array<{ id: string; record: object }>) {
     for (const update of updates) {
       const result = await supabase.from('app_records')
         .update({ record: update.record, updated_at: new Date().toISOString() })
