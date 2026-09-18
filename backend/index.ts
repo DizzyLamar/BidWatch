@@ -46,6 +46,71 @@ const DEFAULT_CATEGORIES = ['Cybersecurity', 'Software Development', 'ICT Infras
 const STATUSES = ['New', 'Reviewing', 'Pursuing', 'Preparing', 'Ready to Submit', 'Applied', 'Declined'];
 const SENSITIVE_PERMISSIONS: Permission[] = ['users.manage', 'roles.manage', 'settings.manage', 'audit.view', 'kpis.view.access', 'kpis.view.storage'];
 const SAFE_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'png', 'jpg', 'jpeg', 'txt', 'zip']);
+const MIME_BY_EXTENSION: Record<string, string[]> = {
+  pdf: ['application/pdf'],
+  doc: ['application/msword'],
+  docx: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  xls: ['application/vnd.ms-excel'],
+  xlsx: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  csv: ['text/csv', 'application/csv', 'application/vnd.ms-excel'],
+  ppt: ['application/vnd.ms-powerpoint'],
+  pptx: ['application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+  png: ['image/png'],
+  jpg: ['image/jpeg'],
+  jpeg: ['image/jpeg'],
+  txt: ['text/plain'],
+  zip: ['application/zip', 'application/x-zip-compressed']
+};
+const REQUEST_LIMITS = new Map<string, { count: number; resetAt: number }>();
+const RATE_WINDOW_MS = 5 * 60 * 1000;
+const RATE_LIMITS = { upload: 20, scan: 2 };
+
+function rateLimit(key: string, limit: number) {
+  const nowMs = Date.now();
+  const current = REQUEST_LIMITS.get(key);
+  if (!current || current.resetAt <= nowMs) {
+    REQUEST_LIMITS.set(key, { count: 1, resetAt: nowMs + RATE_WINDOW_MS });
+    return true;
+  }
+  if (current.count >= limit) return false;
+  current.count += 1;
+  return true;
+}
+
+function decodeBase64(content: string): Uint8Array | null {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(content) || content.length % 4 !== 0) return null;
+  try {
+    const decoded = Buffer.from(content, 'base64');
+    return new Uint8Array(decoded);
+  } catch {
+    return null;
+  }
+}
+
+function hasSignature(bytes: Uint8Array, ext: string) {
+  if (['txt', 'csv'].includes(ext)) return true;
+  if (ext === 'pdf') return bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+  if (['png'].includes(ext)) return bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+  if (['jpg', 'jpeg'].includes(ext)) return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (['doc', 'xls', 'ppt'].includes(ext)) return bytes.length >= 8 && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0 && bytes[4] === 0xa1 && bytes[5] === 0xb1 && bytes[6] === 0x1a && bytes[7] === 0xe1;
+  if (['docx', 'xlsx', 'pptx', 'zip'].includes(ext)) return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
+  return false;
+}
+
+function validateUpload(filename: string, mimeType: string, claimedSize: number, content: string) {
+  const ext = filename.toLowerCase().split('.').pop() || '';
+  if (!filename || !content) return 'File data is required.';
+  if (filename.length > 255 || !SAFE_EXTENSIONS.has(ext)) return 'This file type is not permitted.';
+  if (!Number.isFinite(claimedSize) || claimedSize <= 0 || claimedSize > 10 * 1024 * 1024) return 'Files must be between 1 byte and 10 MB in the current upload path.';
+  if (content.length > 14 * 1024 * 1024) return 'Encoded file payload is too large.';
+  const allowedMimes = MIME_BY_EXTENSION[ext] || [];
+  if (allowedMimes.length && !allowedMimes.includes(mimeType)) return 'The declared file type does not match the selected file extension.';
+  const bytes = decodeBase64(content);
+  if (!bytes) return 'The uploaded file is not valid base64 data.';
+  if (bytes.byteLength !== claimedSize) return 'The uploaded file size does not match its declared size.';
+  if (!hasSignature(bytes, ext)) return 'The uploaded file signature does not match its extension.';
+  return null;
+}
 const MAX_TEXT: Record<string, number> = { title: 180, organisation: 180, reference: 120, description: 8000, source: 180, category: 80, notes: 8000, submissionReference: 180, url: 500, deadline: 40 };
 
 interface Role { id: string; name: string; description: string; permissions: Permission[]; system: boolean; createdAt: string; updatedAt: string }
@@ -251,7 +316,7 @@ export const handler = router({
   'GET /api/opportunities/sources': [requireAuth(), requirePermission('bids.view'), async () => json({ sources: DISCOVERY_SOURCES })],
   'GET /api/opportunities/updates': [requireAuth(), requirePermission('bids.view'), async () => json({ updates: await listOpportunityUpdates(60) })],
   'GET /api/opportunities/:id': [requireAuth(), requirePermission('bids.view'), async ctx => { const opportunity = await verifyOpportunity(ctx.params.id); if (!opportunity) return error('Opportunity not found.', 404); return json({ opportunity }); }],
-  'POST /api/opportunities/scan': [requireAuth(), requirePermission('bids.view'), async () => { const sources = await discoverPlatformOpportunities(); await persistOpportunityUpdates(sources); const persisted = await listOpportunityUpdates(120); const missingDeadlines = persisted.filter(item => !item.deadline && item.state !== 'dismissed').slice(0, 30); for (const item of missingDeadlines) await verifyOpportunity(item.id); return json({ scannedAt: now(), sources }); }],
+  'POST /api/opportunities/scan': [requireAuth(), requirePermission('bids.view'), async ctx => { if (!rateLimit(`scan:${ctx.user!.userId}`, RATE_LIMITS.scan)) return error('Source scanning is temporarily rate-limited. Try again in a few minutes.', 429); const sources = await discoverPlatformOpportunities(); await persistOpportunityUpdates(sources); const persisted = await listOpportunityUpdates(120); const missingDeadlines = persisted.filter(item => !item.deadline && item.state !== 'dismissed').slice(0, 30); for (const item of missingDeadlines) await verifyOpportunity(item.id); return json({ scannedAt: now(), sources }); }],
   'POST /api/opportunities/import': [requireAuth(), requirePermission('bids.create'), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const title = text(b.title, 'title'); const organisation = text(b.organisation, 'organisation', 'Unknown organisation'); const deadline = text(b.deadline, 'deadline'); const url = text(b.url, 'url'); const category = text(b.category, 'category', 'Other'); const reference = text(b.reference, 'reference'); if (!title || !deadline || !validDeadline(deadline)) return error('A valid title and deadline are required to import an opportunity.', 400); if (!validUrl(url)) return error('Only http and https source URLs are allowed.', 400); const cats = await listAll<{ name: string; active: boolean }>('categories'); if (!cats.some(c => c.active && c.name === category)) return error('Category is not active.', 400); const existing = await listAll<Tender>('tenders'); const duplicate = existing.find(t => (reference && t.reference && t.reference.toLowerCase() === reference.toLowerCase()) || (url && t.url && t.url === url)); if (duplicate) return json({ duplicate: true, tender: duplicate }); const [id] = await db.add('tenders', [{ title, organisation, reference, description: text(b.description, 'description'), deadline, source: text(b.source, 'source'), url, category, status: 'New', assigneeId: '', submittedBy: u.id, submittedAt: now(), notes: text(b.notes, 'notes'), revision: 1 }]); if (!id) return error('Could not import opportunity.', 500); const opportunityUpdateId = text(b.opportunityUpdateId, 'reference'); if (opportunityUpdateId) { const update = await getById<Record<string, unknown>>('opportunity_updates', opportunityUpdateId); if (update) await db.update('opportunity_updates', [{ id: update.id, record: { ...update, state: 'imported', importedTenderId: id, lastSeenAt: now() } }]); } await tenderLog(id, ctx, 'imported an opportunity', text(b.source, 'source')); return json({ duplicate: false, tender: await getById<Tender>('tenders', id) }, 201); }],
   'GET /api/kpis': [requireAuth(), requirePermission('bids.view'), async ctx => { const u = await actor(ctx); return json({ kpis: await buildKpis(ctx, u) }); }],
   'GET /api/tenders': [requireAuth(), requirePermission('bids.view'), async () => json({ tenders: (await listAll<Tender>('tenders')).map(t => ({ ...t, revision: Number(t.revision || 1) })) })],
@@ -263,7 +328,7 @@ export const handler = router({
   'POST /api/tenders/:id/apply': [requireAuth(), requirePermission('bids.apply'), async ctx => { const u = await actor(ctx); const old = await requireTender(ctx.params.id); if (!old) return error('Bid not found.', 404); if (['Applied', 'Declined'].includes(old.status)) return error('This bid is already closed.', 409); const b = ctx.body as Record<string, unknown>; const currentRevision = Number(old.revision || 1); const expectedRevision = b.expectedRevision === undefined ? currentRevision : Number(b.expectedRevision); if (!Number.isInteger(expectedRevision) || expectedRevision !== currentRevision) return error('This bid was changed by another user. Refresh the record before recording the submission.', 409); const submissionReference = text(b.submissionReference, 'submissionReference'); const next = { ...old, status: 'Applied', appliedBy: u.id, appliedAt: now(), submissionReference, revision: currentRevision + 1 }; await db.update('tenders', [{ id: old.id, record: next }]); await tenderLog(old.id, ctx, 'marked the bid Applied', submissionReference); return json({ tender: next }); }],
   'POST /api/tenders/:id/decline': [requireAuth(), requirePermission('bids.decline'), async ctx => { const old = await requireTender(ctx.params.id); if (!old) return error('Bid not found.', 404); if (['Applied', 'Declined'].includes(old.status)) return error('This bid is already closed.', 409); const b = ctx.body as Record<string, unknown>; const currentRevision = Number(old.revision || 1); const expectedRevision = b.expectedRevision === undefined ? currentRevision : Number(b.expectedRevision); if (!Number.isInteger(expectedRevision) || expectedRevision !== currentRevision) return error('This bid was changed by another user. Refresh the record before declining it.', 409); await db.update('tenders', [{ id: old.id, record: { ...old, status: 'Declined', revision: currentRevision + 1 } }]); await tenderLog(old.id, ctx, 'marked the bid Declined'); return json({ tender: await getById<Tender>('tenders', old.id) }); }],
   'GET /api/tenders/:id/attachments': [requireAuth(), requirePermission('bids.view'), async ctx => { const tender = await requireTender(ctx.params.id); if (!tender) return error('Bid not found.', 404); const a = await listAll<{ tenderId: string; filename: string; mimeType: string; size: number; path: string; uploadedBy: string; uploadedAt: string }>('attachments'); return json({ attachments: a.filter(x => x.tenderId === tender.id) }); }],
-  'POST /api/tenders/:id/attachments': [requireAuth(), requirePermission('attachments.upload'), async ctx => { const u = await actor(ctx); const tender = await requireTender(ctx.params.id); if (!tender) return error('Bid not found.', 404); const b = ctx.body as Record<string, unknown>; const filename = String(b.filename || '').trim(); const mimeType = String(b.mimeType || 'application/octet-stream').toLowerCase(); const size = Number(b.size || 0); const content = String(b.content || ''); const ext = filename.toLowerCase().split('.').pop() || ''; if (!filename || !content) return error('File data is required.', 400); if (filename.length > 255 || !SAFE_EXTENSIONS.has(ext)) return error('This file type is not permitted.', 400); if (!Number.isFinite(size) || size <= 0 || size > 10 * 1024 * 1024) return error('Files must be between 1 byte and 10 MB in the current upload path.', 400); if (content.length > 14 * 1024 * 1024) return error('Encoded file payload is too large.', 400); const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_'); const path = `tenders/${tender.id}/${crypto.randomUUID()}-${safeName}`; const ok = await storageService.put(path, content, mimeType); if (!ok) return error('File upload failed.', 500); const [id] = await db.add('attachments', [{ tenderId: tender.id, filename, mimeType, size, path, uploadedBy: u.id, uploadedAt: now() }]); if (!id) { await storageService.delete([path]); return error('Could not save attachment metadata.', 500); } await tenderLog(tender.id, ctx, 'uploaded an attachment', filename); return json({ attachment: { id, filename } }, 201); }],
+  'POST /api/tenders/:id/attachments': [requireAuth(), requirePermission('attachments.upload'), async ctx => { const u = await actor(ctx); const tender = await requireTender(ctx.params.id); if (!tender) return error('Bid not found.', 404); const b = ctx.body as Record<string, unknown>; if (!rateLimit(`upload:${ctx.user!.userId}`, RATE_LIMITS.upload)) return error('Upload rate limit reached. Try again in a few minutes.', 429); const filename = String(b.filename || '').trim(); const mimeType = String(b.mimeType || 'application/octet-stream').toLowerCase(); const size = Number(b.size || 0); const content = String(b.content || ''); const validationError = validateUpload(filename, mimeType, size, content); if (validationError) return error(validationError, 400); const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_'); const path = `tenders/${tender.id}/${crypto.randomUUID()}-${safeName}`; const ok = await storageService.put(path, content, mimeType); if (!ok) return error('File upload failed.', 500); const [id] = await db.add('attachments', [{ tenderId: tender.id, filename, mimeType, size, path, uploadedBy: u.id, uploadedAt: now() }]); if (!id) { await storageService.delete([path]); return error('Could not save attachment metadata.', 500); } await tenderLog(tender.id, ctx, 'uploaded an attachment', filename); return json({ attachment: { id, filename } }, 201); }],
   'GET /api/attachments/:id/url': [requireAuth(), requirePermission('bids.view'), async ctx => { const a = await getById<{ tenderId: string; path: string }>('attachments', ctx.params.id); if (!a || !(await requireTender(a.tenderId))) return error('Attachment not found.', 404); const url = await storageService.getUrl(a.path); return json({ url }); }],
   'DELETE /api/attachments/:id': [requireAuth(), requirePermission('attachments.delete'), async ctx => { const a = await getById<{ tenderId: string; path: string; filename: string }>('attachments', ctx.params.id); if (!a) return error('Attachment not found.', 404); if (!(await requireTender(a.tenderId))) return error('Attachment not found.', 404); const [deleted] = await storageService.delete([a.path]); if (!deleted) return error('Could not delete the stored document.', 500); await db.delete('attachments', [ctx.params.id]); await tenderLog(a.tenderId, ctx, 'deleted an attachment', a.filename); return json({ ok: true }); }],
   'GET /api/tenders/:id/activity': [requireAuth(), requirePermission('bids.view'), async ctx => { if (!(await requireTender(ctx.params.id))) return error('Bid not found.', 404); const a = await listAll<{ tenderId: string; actorName: string; action: string; detail: string; createdAt: string }>('activity'); return json({ activities: a.filter(x => x.tenderId === ctx.params.id).sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime()) }); }],
