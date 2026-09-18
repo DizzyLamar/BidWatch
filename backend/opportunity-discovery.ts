@@ -196,7 +196,7 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
         }
       }
     }));
-    const notices = details.flatMap(payload => extractOcdsCandidates(payload).map(candidate => normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference))).filter((item): item is Opportunity => Boolean(item)));
+    const notices = details.flatMap((payload: unknown) => extractOcdsCandidates(payload).map(candidate => normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference))).filter((item): item is Opportunity => Boolean(item)));
     const unique = new Map<string, Opportunity>();
     for (const item of notices) unique.set(`${item.reference}|${item.url}|${item.title}`.toLowerCase(), item);
     return {
