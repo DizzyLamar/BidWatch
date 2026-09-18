@@ -121,7 +121,14 @@
       "Declined permission boundary",
       "sensitive role permission boundary",
       "trusted procurement verification hosts",
-      "administration destructive confirmation"
+      "administration destructive confirmation",
+      "server-side upload extension allowlist",
+      "upload MIME validation",
+      "base64 validation",
+      "declared-size validation",
+      "file signature validation",
+      "upload rate limiting",
+      "opportunity scan rate limiting"
     ],
     "description": "Verifies two users cannot silently overwrite a newer bid revision and privileged administrative operations remain server-enforced and explicitly confirmed.",
     "steps": [
@@ -131,24 +138,7 @@
       "Sign in as a role without bids.apply or bids.decline and attempt a protected status transition",
       "Sign in as a non-Super-Admin role manager and attempt to allocate a sensitive access-control permission",
       "Open a removable custom role and choose Delete role",
-      "Review the confirmation dialog and choose Keep it"
-    ],
-    "expected": "Actor B receives a stale-record conflict instead of overwriting Actor A's change, protected workflow transitions and sensitive permissions are rejected by the backend, procurement verification does not fetch untrusted hosts, and cancelling role deletion leaves the role intact."
-  },
-  {
-    "name": "Upload validation and high-cost discovery operations are bounded",
-    "viewport": "desktop",
-    "covers": [
-      "server-side upload extension allowlist",
-      "upload MIME validation",
-      "base64 validation",
-      "declared-size validation",
-      "file signature validation",
-      "upload rate limiting",
-      "opportunity scan rate limiting"
-    ],
-    "description": "Verifies untrusted attachment bytes are checked server-side before storage and expensive discovery/upload operations have per-user request limits.",
-    "steps": [
+      "Review the confirmation dialog and choose Keep it",
       "Attempt to upload a file whose extension and declared MIME type disagree",
       "Attempt to upload a file with a valid extension but an invalid base64 payload",
       "Attempt to upload a file whose declared byte size differs from its decoded payload",
@@ -156,6 +146,6 @@
       "Perform repeated attachment uploads until the per-user upload limit is reached",
       "Run source discovery repeatedly until the per-user scan limit is reached"
     ],
-    "expected": "Mismatched, malformed, size-inconsistent and signature-inconsistent files are rejected before storage; repeated uploads and source scans receive a 429 response after their configured limits."
+    "expected": "Actor B receives a stale-record conflict instead of overwriting Actor A's change, protected workflow transitions and sensitive permissions are rejected by the backend, procurement verification does not fetch untrusted hosts, cancelling role deletion leaves the role intact, malformed or mismatched attachment data is rejected before storage, and repeated uploads/source scans are rate-limited."
   }
 ]
