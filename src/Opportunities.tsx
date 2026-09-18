@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Check, ExternalLink, Filter, Globe2, LoaderCircle, Plus, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
-import { api } from '@appdeploy/client';
+import { api } from './platform';
 
 type Opportunity = { id: string; title?: string; organisation?: string; reference?: string; deadline?: string; description?: string; noticeType?: string; url?: string; sourceId: string; source: string; sourceUrl: string; matchedTerms?: string[]; alsoListedOn?: string[]; state: 'new' | 'imported' | 'dismissed'; firstSeenAt?: string; lastSeenAt?: string; details?: { publishedAt?: string; procurementMethod?: string; eligibility?: string; submissionMethod?: string; documents?: Array<{ title: string; url: string }>; contact?: { name?: string; email?: string; phone?: string }; verification?: string } };
 type SourceResult = { sourceId: string; source: string; sourceUrl: string; status: 'ok' | 'authentication_required' | 'error'; notices: Opportunity[]; message: string };
