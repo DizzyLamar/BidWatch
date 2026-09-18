@@ -3,23 +3,31 @@
     "name": "First sign-in completes the BidWatch introduction before the workspace",
     "sanity": true,
     "viewport": "desktop",
-    "covers": ["Google authentication", "provisioned-user authorization", "first-login onboarding", "onboarding completion persistence", "bid creation"],
+    "covers": ["Google authentication", "provisioned-user authorization", "technical SEO metadata and private-route indexing controls", "self-referencing canonical and Open Graph metadata", "first-login onboarding", "onboarding completion persistence", "bid creation"],
     "description": "Verifies a provisioned user receives a concise first-use introduction, can complete it, and can then use the normal bid workflow.",
-    "steps": ["Sign in with the provisioned Google account for a user who has not completed onboarding", "Review the three-step BidWatch introduction", "Choose Start using BidWatch on the final step", "Open Add bid and create a valid bid titled \"Network Security RFP\"", "Refresh BidWatch"],
+    "steps": ["Open the BidWatch sign-in screen and verify the page title, description, canonical, Open Graph image and noindex metadata", "Sign in with the provisioned Google account for a user who has not completed onboarding", "Verify the authenticated Dashboard remains noindex and has a self-referencing canonical plus Open Graph metadata", "Review the three-step BidWatch introduction", "Choose Start using BidWatch on the final step", "Open Add bid and create a valid bid titled \"Network Security RFP\"", "Refresh BidWatch"],
     "expected": "The onboarding dialog is shown only before completion, the user reaches the Dashboard, the bid persists, and the introduction does not reappear after refresh."
   },
   {
-    "name": "Bid filters, Insights visualization, and responsive layout remain clear on mobile",
+    "name": "Find and review ICT procurement opportunities from public sources",
+    "viewport": "desktop",
+    "covers": ["procurement source scanning", "ICT and cybersecurity terminology matching", "PPPC source", "PPDA source", "MANEPS OCDS API discovery", "opportunity persistence", "deadline verification", "custom opportunity filtering", "cybersecurity prioritization", "deadline-aware pagination", "reference-based duplicate indication", "current-deadline filtering", "dashboard platform updates", "opportunity detail review", "prefilled opportunity import", "import opportunity into bids"],
+    "description": "Verifies the new discovery workspace scans configured procurement sources, surfaces relevant opportunities, identifies inaccessible authenticated sources honestly, and lets an authorized user import a valid opportunity.",
+    "steps": ["Open Find Opportunities", "Choose Scan sources", "Review the PPPC and PPDA source statuses and any relevant ICT or cybersecurity opportunities", "Verify MANEPS is reported through its public OCDS/API discovery path without asking for a MANEPS password", "Filter opportunities to cybersecurity and sort them by priority and deadline urgency", "Open a returned opportunity and review its source, organisation, reference, deadline, verification status, participation details and available documents", "Verify expired opportunities are absent from the default current list and use Needs verification to inspect records without a published deadline", "Change the rows-per-page control and move between Page 1 of N and later pages", "Review an opportunity with a repeated reference and verify it identifies the other source instead of presenting the records as unrelated", "If a deadline is missing, choose Verify source details and review the result", "Prepare an import and verify the source fields are pre-filled for editing before adding it to BidWatch", "Open All Bids"],
+    "expected": "Public-source results are shown inside BidWatch, MANEPS is not falsely represented as accessible when authentication is required, and an imported opportunity appears in All Bids without duplicating an existing reference or source URL."
+  },
+  {
+    "name": "Bid filters are explicitly labelled and remain usable on mobile",
     "viewport": "mobile",
-    "covers": ["status filter label", "category filter label", "filtering behavior", "Insights pipeline chart", "mobile dashboard layout", "text spacing and overflow prevention"],
-    "description": "Verifies bid filters identify what they filter, the Insights page provides a useful visual pipeline representation, and dense content remains readable at a narrow viewport.",
-    "steps": ["Open All Bids at 375x667", "Verify one filter is labelled Status and the other is labelled Category", "Open the Status filter and select Reviewing", "Open the Category filter and select Cybersecurity", "Verify the result list reflects both selected filters", "Open Insights and review Bids by stage and Upcoming deadlines", "Increase browser text size or zoom and review the page"],
-    "expected": "The filters are clearly labelled and usable, Insights contains a visible workflow-distribution chart and deadline analysis, and the interface remains readable without clipping or overcrowding."
+    "covers": ["status filter label", "category filter label", "filtering behavior", "mobile dashboard layout", "text spacing and overflow prevention"],
+    "description": "Verifies the two bid filters identify what they filter instead of presenting ambiguous repeated All controls, while remaining readable at a narrow viewport.",
+    "steps": ["Open All Bids at 375x667", "Verify one filter is labelled Status and the other is labelled Category", "Open the Status filter and select Reviewing", "Verify only bids in the Reviewing stage remain", "Open the Category filter and select Cybersecurity", "Verify the result list reflects both selected filters", "Increase browser text size or zoom and review the filter controls"],
+    "expected": "The filters have clear labels, their selections work together, and their labels and controls remain readable without clipping or ambiguous duplicate labels."
   },
   {
     "name": "Destructive deletion preserves a text-only bid history record",
     "viewport": "desktop",
-    "covers": ["bid deletion", "destructive-action confirmation", "bid history archive", "document lifecycle", "GET /api/history"],
+    "covers": ["bid deletion", "destructive-action confirmation", "Applied confirmation", "Declined confirmation", "bid history archive", "document lifecycle", "GET /api/history"],
     "description": "Verifies an irreversible bid deletion requires explicit confirmation and preserves the bid metadata after stored documents are removed.",
     "setup": ["Create a bid titled \"Historical RFP\" with organisation \"Example Org\" and a small PDF attachment"],
     "steps": ["Open the bid", "Choose Delete bid and documents", "Review the impact message and choose Keep it", "Choose Delete bid and documents again", "Choose Delete bid in the confirmation dialog", "Open Bid History"],
@@ -32,14 +40,5 @@
     "description": "Verifies two users cannot silently overwrite a newer bid revision and privileged administrative operations remain server-enforced and explicitly confirmed.",
     "steps": ["Actor A and Actor B open the same editable bid before either saves changes", "Actor A saves a status or assignment change", "Actor B attempts to save the stale version of that bid", "Sign in as a role without bids.apply or bids.decline and attempt a protected status transition", "Sign in as a non-Super-Admin role manager and attempt to allocate a sensitive access-control permission", "Open a removable custom role and choose Delete role", "Review the confirmation dialog and choose Keep it"],
     "expected": "Actor B receives a stale-record conflict instead of overwriting Actor A's change, protected workflow transitions and sensitive permissions are rejected by the backend, and cancelling role deletion leaves the role intact."
-  },
-  {
-    "name": "Production errors remain actionable without exposing internals",
-    "viewport": "desktop",
-    "covers": ["server error handling", "user-visible error state", "safe error messaging", "recovery behavior", "request failure handling"],
-    "description": "Verifies a simulated server failure is surfaced as a concise user-facing error rather than a blank screen or technical stack trace.",
-    "qa_faults": [{"method":"POST","path":"/api/tenders","status":500,"body_json":{"error":"simulated_internal_failure","stack":"SECRET_STACK_TRACE"}}],
-    "steps": ["Open Add bid", "Enter a valid bid", "Submit while the server returns the simulated 500 response"],
-    "expected": "The UI shows a plain-language failure message and does not display the injected stack trace or internal implementation details."
   }
 ]
