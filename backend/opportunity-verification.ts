@@ -31,6 +31,8 @@ type OpportunityUpdate = {
   details?: OpportunityDetails;
 };
 
+const ALLOWED_SOURCE_HOSTS = ['pppc.mw', 'ppda.mw', 'maneps.mw'];
+function allowedSourceUrl(value: string) { try { const url = new URL(value); if (url.protocol !== 'https:' || url.port) return false; const host = url.hostname.toLowerCase(); return ALLOWED_SOURCE_HOSTS.some(domain => host === domain || host.endsWith(`.${domain}`)); } catch { return false; } }
 const TERMS = ['cybersecurity', 'cyber security', 'information security', 'penetration testing', 'penetration test', 'vulnerability assessment', 'security assessment', 'security audit', 'soc', 'siem', 'endpoint security', 'edr', 'xdr', 'firewall', 'network security', 'identity and access management', 'iam', 'zero trust', 'privileged access', 'mfa', 'multi-factor authentication', 'data protection', 'privacy', 'digital forensics', 'incident response', 'iso 27001', 'pci dss', 'dlp', 'managed detection', 'managed security', 'cloud security', 'ict', 'information technology', 'information systems', 'software', 'network', 'server', 'cloud', 'data analytics', 'database', 'application development', 'it support', 'helpdesk', 'telecommunications', 'consultancy', 'rfp', 'rfq', 'tender'];
 function text(value: unknown) { return String(value ?? '').replace(/\s+/g, ' ').trim(); }
 function dateString(value: unknown) { const valueText = text(value); if (!valueText) return ''; const time = new Date(valueText).getTime(); return Number.isFinite(time) ? new Date(time).toISOString() : ''; }
