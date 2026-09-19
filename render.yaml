@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: bidwatch
+    runtime: node
+    plan: free
+    branch: migration/render-supabase
+    autoDeploy: true
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BIDWATCH_STORAGE_BUCKET
+        value: bidwatch
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: CRON_SECRET
+        sync: false

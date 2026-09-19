@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '@appdeploy/client';
-import { auth } from '@appdeploy/client';
+import { api, auth } from './platform';
 import {
   Archive,
   Bell,
@@ -280,7 +279,7 @@ export default function App() {
           setPermissionMeta(access.permissions);
         }
       } catch (e: any) {
-        const message = e?.status === 402 ? 'BidWatch backend access is temporarily unavailable. The AppDeploy service is returning Payment Required; no workspace data was changed.' : e?.status >= 500 ? 'BidWatch is temporarily unavailable. Please try again.' : e?.message || 'Could not load BidWatch.';
+        const message = e?.status >= 500 ? 'BidWatch is temporarily unavailable. Please try again.' : e?.message || 'Could not load BidWatch.';
         setLoadError(message);
         showNotice(message, 'error');
       } finally {
@@ -297,10 +296,13 @@ export default function App() {
   }
   useEffect(() => {
     (async () => {
-      if (auth.isSignedIn()) {
+      try {
         const u = await auth.getUser();
-        setUser(u);
-      } else setLoading(false);
+        if (u) setUser(u);
+        else setLoading(false);
+      } catch {
+        setLoading(false);
+      }
     })();
   }, []);
   useEffect(() => {
@@ -340,10 +342,7 @@ export default function App() {
 
   async function signIn() {
     try {
-      const result = await auth.signIn({
-        scope: 'openid email profile offline_access',
-      });
-      setUser(result.user);
+      await auth.signIn();
     } catch (e: any) {
       setNotice(
         e?.code === 'popup_blocked'
@@ -1743,8 +1742,8 @@ function SettingsView({ profile, setNotice }: any) {
 }
 function NotificationPreferences({ setNotice }: any) {
   const [env, setEnv] = useState<any>(null);
-  useEffect(() => { void import('@appdeploy/client').then(() => setEnv({ supported: true })); }, []);
-  return <div className="notification-preferences"><div><b>Browser notifications</b><span>Receive deadline alerts outside BidWatch when your browser supports push notifications.</span></div><button className="secondary" onClick={async () => { try { const mod = await import('@appdeploy/client'); await mod.notifications.subscribe({ showUi: true }); setNotice('Browser notifications enabled.', 'success'); } catch { setNotice('Browser notifications could not be enabled. Check your browser permission and try again.', 'warning'); } }}>{env?.supported ? 'Enable browser notifications' : 'Enable browser notifications'}</button><div className="email-notification-note"><b>Email notifications</b><span>Email delivery is supported as a planned integration, but it requires a transactional email provider and verified sending domain before it can send production mail.</span></div></div>;
+  useEffect(() => { void import('./platform').then(() => setEnv({ supported: true })); }, []);
+  return <div className="notification-preferences"><div><b>Browser notifications</b><span>Receive deadline alerts outside BidWatch when your browser supports push notifications.</span></div><button className="secondary" onClick={async () => { try { const mod = await import('./platform'); await mod.notifications.subscribe({ showUi: true }); setNotice('Browser notifications enabled.', 'success'); } catch { setNotice('Browser notifications could not be enabled. Check your browser permission and try again.', 'warning'); } }}>{env?.supported ? 'Enable browser notifications' : 'Enable browser notifications'}</button><div className="email-notification-note"><b>Email notifications</b><span>Email delivery is supported as a planned integration, but it requires a transactional email provider and verified sending domain before it can send production mail.</span></div></div>;
 }
 function AboutView() {
   return (
@@ -1758,7 +1757,7 @@ function AboutView() {
     </>
   );
 }
-function LegacySettingsView({ setNotice }: any) { return <><PageHead title='Settings' subtitle='Your BidWatch workspace preferences.' /><section className='panel settings-page'><div className='settings-section'><div><h2>Notifications</h2><p>Receive deadline alerts in your browser when supported.</p></div><button className='secondary' onClick={async () => { try { const mod = await import('@appdeploy/client'); await mod.notifications.subscribe({ showUi: true }); setNotice('Browser notifications enabled.', 'success'); } catch { setNotice('Browser notifications could not be enabled. Check browser permissions and try again.', 'warning'); } }}>Enable browser notifications</button></div><div className='settings-section'><div><h2>Email notifications</h2><p>Email delivery requires a transactional email provider and verified sending domain before production mail can be sent.</p></div><span className='status neutral'>Provider configuration required</span></div><div className='settings-section'><div><h2>Deadline reminders</h2><p>Reminders are generated 14, 7, 3 and 1 day before a deadline, on deadline day, and when overdue.</p></div></div><div className='settings-section'><div><h2>Access</h2><p>Your permissions are controlled by your assigned BidWatch role.</p></div></div></section></>; }
+function LegacySettingsView({ setNotice }: any) { return <><PageHead title='Settings' subtitle='Your BidWatch workspace preferences.' /><section className='panel settings-page'><div className='settings-section'><div><h2>Notifications</h2><p>Receive deadline alerts in your browser when supported.</p></div><button className='secondary' onClick={async () => { try { const mod = await import('./platform'); await mod.notifications.subscribe({ showUi: true }); setNotice('Browser notifications enabled.', 'success'); } catch { setNotice('Browser notifications could not be enabled. Check browser permissions and try again.', 'warning'); } }}>Enable browser notifications</button></div><div className='settings-section'><div><h2>Email notifications</h2><p>Email delivery requires a transactional email provider and verified sending domain before production mail can be sent.</p></div><span className='status neutral'>Provider configuration required</span></div><div className='settings-section'><div><h2>Deadline reminders</h2><p>Reminders are generated 14, 7, 3 and 1 day before a deadline, on deadline day, and when overdue.</p></div></div><div className='settings-section'><div><h2>Access</h2><p>Your permissions are controlled by your assigned BidWatch role.</p></div></div></section></>; }
 function LegacySettingsRulesRemoved() { return null; } /*
       <section className="panel settings">
         <div>

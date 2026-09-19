@@ -1,5 +1,4 @@
-import { ai, db } from '@appdeploy/sdk';
-import { router, json, error, requireAuth, type RouterContext } from '@appdeploy/sdk';
+import { db, router, json, error, requireAuth, type RouterContext } from './runtime';
 import { storageService } from './storage';
 import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES } from './opportunity-discovery';
 import { verifyOpportunity } from './opportunity-verification';
@@ -118,7 +117,7 @@ interface User { id: string; userId?: string; email: string; name: string; roleI
 interface Tender { id: string; title: string; organisation: string; reference: string; description: string; deadline: string; source: string; url: string; category: string; status: string; assigneeId: string; submittedBy: string; submittedAt: string; notes: string; revision?: number; submissionReference?: string; appliedBy?: string; appliedAt?: string }
 interface BidHistory { id: string; originalTenderId: string; title: string; organisation: string; reference: string; description: string; deadline: string; source: string; url: string; category: string; status: string; assigneeId: string; submittedBy: string; submittedAt: string; notes: string; submissionReference?: string; appliedBy?: string; appliedAt?: string; deletedBy: string; deletedAt: string; attachmentCount: number }
 
-const OPPORTUNITY_SOURCES = [
+const OPPORTUNITY_SOURCES_UNUSED = [
   { id: 'pppc', name: 'PPPC procurement adverts', url: 'https://www.pppc.mw/procurement/adverts', kind: 'public' },
   { id: 'ppda', name: 'PPDA procurement notices', url: 'https://ppda.mw/tenders', kind: 'public' },
   { id: 'maneps', name: 'MANEPS procurement notices', url: 'https://maneps.mw/procurement-notice', kind: 'portal' },
@@ -136,58 +135,9 @@ const OPPORTUNITY_TERMS = [
   'request for quotation', 'request for proposals', 'tender'
 ];
 
-function opportunityMatch(textValue: string) {
+function opportunityMatch_UNUSED(textValue: string) {
   const haystack = textValue.toLowerCase();
   return OPPORTUNITY_TERMS.filter(term => haystack.includes(term)).slice(0, 12);
-}
-
-async function scrapeOpportunities() {
-  const results: Array<Record<string, unknown>> = [];
-  for (const source of OPPORTUNITY_SOURCES) {
-    try {
-      const scraped = await ai.scrape({ url: source.url });
-      const textContent = String(scraped.text || '').slice(0, 50000);
-      const looksAuthenticated = source.kind === 'portal' && /\blogin\b|\bsign up\b|\bpassword\b/i.test(textContent) && !/procurement notice|tender notice|closing date|deadline/i.test(textContent);
-      if (looksAuthenticated || textContent.length < 120) {
-        results.push({ sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'authentication_required', notices: [], message: 'The source did not expose usable procurement notices to the server scraper. MANEPS may require an authenticated vendor session.' });
-        continue;
-      }
-      const extracted = await ai.extract({
-        content: textContent,
-        prompt: `Extract procurement opportunities relevant to an ICT and cybersecurity company. Include tenders, bids, RFPs, RFQs, expressions of interest, consultancy opportunities, procurement notices and technology-related consultations. Do not invent missing values. Keep only opportunities whose title or description has a plausible ICT, cybersecurity, software, infrastructure, networking, data, digital transformation, IT support, telecommunications or related technology scope. Source: ${source.name}.`,
-        schema: {
-          type: 'object',
-          properties: {
-            notices: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  title: { type: 'string' }, organisation: { type: 'string' }, reference: { type: 'string' },
-                  deadline: { type: 'string' }, description: { type: 'string' }, noticeType: { type: 'string' }, url: { type: 'string' }
-                },
-                required: ['title']
-              }
-            }
-          },
-          required: ['notices']
-        },
-        maxTokens: 4096,
-        thinkingMode: 'FAST'
-      });
-      const notices = Array.isArray((extracted.data as { notices?: unknown[] })?.notices) ? (extracted.data as { notices: unknown[] }).notices : [];
-      const normalized = notices.map((item) => {
-        const n = (item || {}) as Record<string, unknown>;
-        const combined = [n.title, n.organisation, n.reference, n.description, n.noticeType].filter(Boolean).join(' ');
-        const matches = opportunityMatch(combined);
-        return { ...n, sourceId: source.id, source: source.name, sourceUrl: source.url, matchedTerms: matches, matched: matches.length > 0 };
-      }).filter((n) => n.matched);
-      results.push({ sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'ok', notices: normalized, message: normalized.length ? `Found ${normalized.length} relevant opportunities.` : 'No relevant ICT or cybersecurity opportunities were found in the accessible source content.' });
-    } catch (err) {
-      results.push({ sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'error', notices: [], message: 'The source could not be scanned right now.' });
-    }
-  }
-  return results;
 }
 
 async function listAll<T>(table: string, limit = 500) { const r = await db.list<T>(table, { limit }); return r.items; }
@@ -263,7 +213,7 @@ async function storageStats() {
 }
 
 function kpiPermissionForSection(section: string): Permission { return `kpis.view.${section}` as Permission; }
-async function buildKpis(ctx: RouterContext, u: Awaited<ReturnType<typeof currentUser>>) {
+async function buildKpis(_ctx: RouterContext, u: Awaited<ReturnType<typeof currentUser>>) {
   const tenders = await listAll<Tender>('tenders');
   const result: Record<string, unknown> = {};
   const active = tenders.filter(t => !['Applied', 'Declined'].includes(t.status));
@@ -310,6 +260,11 @@ export async function reminderHandler(_event: unknown) {
 }
 
 export const handler = router({
+  'POST /api/internal/reminders': [async ctx => {
+    const secret = String(ctx.req.headers['x-cron-secret'] || '');
+    if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) return error('Unauthorized.', 401);
+    return json(await reminderHandler(null));
+  }],
   'GET /api/me': [requireAuth(), async ctx => { const u = await currentUser(ctx); if (!u) return error('Your Google account is not provisioned for BidWatch.', 403); if (!u.active || u.status === 'Suspended') return error('Your BidWatch access is suspended.', 403); return json({ user: { ...u, role: u.role?.name || 'Member', onboardingCompleted: u.onboardingCompleted === true } }); }], 'PUT /api/me/profile': [requireAuth(), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('A display name is required.', 400); const next = { ...u, name, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ user: next }); }],
   'PUT /api/me/onboarding': [requireAuth(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
   'GET /api/config': [requireAuth(), requirePermission('bids.view'), async () => { const records = await listAll<{ name: string; active: boolean }>('categories'); return json({ categories: records.filter(x => x.active).map(x => x.name), categoryRecords: records, statuses: STATUSES }); }],

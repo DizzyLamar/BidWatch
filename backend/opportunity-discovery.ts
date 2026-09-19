@@ -1,4 +1,4 @@
-import { ai, db } from '@appdeploy/sdk';
+import { db } from './runtime';
 
 export const OPPORTUNITY_SOURCES = [
   { id: 'pppc', name: 'PPPC procurement adverts', url: 'https://www.pppc.mw/procurement/adverts', kind: 'public' as const },
@@ -183,7 +183,7 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
       body: JSON.stringify({ skip: 0, take: 250 }),
     });
     const items = Array.isArray(index?.items) ? index.items : [];
-    const details = await Promise.all(items.slice(0, 120).map(async item => {
+    const details = await Promise.all(items.slice(0, 120).map(async (item: any) => {
       const ocid = text(item?.ocid);
       if (!ocid) return null;
       try {
@@ -196,7 +196,7 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
         }
       }
     }));
-    const notices = details.flatMap(payload => extractOcdsCandidates(payload).map(candidate => normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference))).filter((item): item is Opportunity => Boolean(item)));
+    const notices = details.flatMap((payload: unknown) => extractOcdsCandidates(payload).map(candidate => normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference))).filter((item): item is Opportunity => Boolean(item)));
     const unique = new Map<string, Opportunity>();
     for (const item of notices) unique.set(`${item.reference}|${item.url}|${item.title}`.toLowerCase(), item);
     return {
@@ -221,42 +221,115 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
   }
 }
 
+function decodeHtml(value: string) {
+  return value
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/(p|div|li|td|th|tr|h[1-6])>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractDate(value: string) {
+  const normalized = value.replace(/(\d{1,2})(st|nd|rd|th)/gi, '$1');
+  const patterns = [
+    /\b\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?)?\b/,
+    /\b\d{1,2}[\/-]\d{1,2}[\/-]\d{4}\b/,
+    /\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}\b/i,
+    /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match) {
+      const parsed = new Date(match[0]).getTime();
+      if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+    }
+  }
+  return '';
+}
+
+function extractPublicRows(html: string) {
+  const rows: Array<{ cells: string[]; links: string[] }> = [];
+  const rowMatches = html.match(/<tr[\s\S]*?<\/tr>/gi) || [];
+  for (const row of rowMatches) {
+    const cells = (row.match(/<(?:td|th)[^>]*>[\s\S]*?<\/(?:td|th)>/gi) || []).map(decodeHtml).filter(Boolean);
+    if (cells.length < 2) continue;
+    const links = Array.from(row.matchAll(/href\s*=\s*["']([^"']+)["']/gi)).map(match => match[1]);
+    rows.push({ cells, links });
+  }
+  return rows;
+}
+
+function publicCandidates(html: string, source: typeof OPPORTUNITY_SOURCES[number]) {
+  const candidates: Array<Record<string, unknown>> = [];
+  for (const row of extractPublicRows(html)) {
+    const joined = row.cells.join(' ');
+    const lower = joined.toLowerCase();
+    if (/title|institution|reference|publish date|closing date/.test(lower) && row.cells.every(cell => /title|institution|reference|publish|closing/i.test(cell))) continue;
+
+    const deadlineMatch = joined.match(/(?:closing|submission|deadline|due)[^.;]{0,80}/i);
+    const deadline = extractDate(deadlineMatch?.[0] || row.cells[row.cells.length - 1] || '');
+    const title = row.cells[0] || '';
+    const organisation = row.cells[1] || '';
+    const reference = row.cells[2] || '';
+    const publishedAt = extractDate(row.cells[3] || '');
+    const description = row.cells.slice(0, 5).join(' — ');
+    const url = row.links.find(link => /pdf|doc|download|notice|tender/i.test(link)) || row.links[0] || source.url;
+
+    candidates.push({ title, organisation, reference, deadline, publishedAt, description, noticeType: 'Procurement notice', url });
+  }
+
+  if (!candidates.length) {
+    const linkMatches = Array.from(html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi));
+    for (const match of linkMatches) {
+      const title = decodeHtml(match[2]);
+      if (title.length < 20 || title.length > 240) continue;
+      candidates.push({ title, organisation: '', reference: '', deadline: extractDate(title), description: title, noticeType: 'Procurement notice', url: match[1] });
+    }
+  }
+  return candidates;
+}
+
+async function fetchText(url: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'text/html,application/xhtml+xml' },
+    });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    return await response.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function scanPublicPage(source: typeof OPPORTUNITY_SOURCES[number]): Promise<OpportunitySourceResult> {
   try {
-    const scraped = await ai.scrape({ url: source.url });
-    const content = text(scraped.text).slice(0, 70000);
-    if (content.length < 120) {
+    const html = (await fetchText(source.url)).slice(0, 250000);
+    if (html.length < 120) {
       return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'error', accessMethod: 'public-page', notices: [], message: 'The public page did not expose enough procurement content for extraction.' };
     }
-    const extracted = await ai.extract({
-      content,
-      prompt: `Extract current procurement opportunities relevant to an ICT and cybersecurity company from ${source.name}. Include tenders, bids, RFPs, RFQs, expressions of interest, consultancy, advisory services, technology consultations, software, data, networking, infrastructure, telecommunications and security opportunities. Do not invent missing values. Exclude clearly unrelated opportunities.`,
-      schema: {
-        type: 'object',
-        properties: {
-          notices: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                title: { type: 'string' }, organisation: { type: 'string' }, reference: { type: 'string' },
-                deadline: { type: 'string' }, description: { type: 'string' }, noticeType: { type: 'string' }, url: { type: 'string' },
-              },
-              required: ['title'],
-            },
-          },
-        },
-        required: ['notices'],
-      },
-      maxTokens: 6000,
-      thinkingMode: 'FAST',
-    });
-    const extractedData = extracted.data as { notices?: unknown[] } | undefined;
-    const raw = Array.isArray(extractedData?.notices) ? extractedData.notices : [];
-    const notices = raw.map(item => normalizeCandidate(item as Record<string, unknown>, source.id, source.name, source.url)).filter((item): item is Opportunity => Boolean(item));
+
+    const raw = publicCandidates(html, source);
+    const notices = raw.map(item => normalizeCandidate(item, source.id, source.name, source.url)).filter((item): item is Opportunity => Boolean(item));
     const unique = new Map<string, Opportunity>();
-    for (const item of notices) unique.set(`${item.reference}|${item.url}|${item.title}`.toLowerCase(), item);
-    return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'ok', accessMethod: 'public-page', notices: Array.from(unique.values()).slice(0, 80), message: `Found ${unique.size} relevant opportunities in the accessible public page.` };
+    for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
+
+    return {
+      sourceId: source.id,
+      source: source.name,
+      sourceUrl: source.url,
+      status: 'ok',
+      accessMethod: 'public-page',
+      notices: Array.from(unique.values()).slice(0, 80),
+      message: 'Found ' + unique.size + ' relevant opportunities using deterministic public-page extraction. Missing values are left blank rather than inferred.',
+    };
   } catch {
     return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'error', accessMethod: 'public-page', notices: [], message: 'The public source could not be scanned right now.' };
   }
