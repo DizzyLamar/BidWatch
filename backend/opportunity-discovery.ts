@@ -1,27 +1,27 @@
-import { ai, db } from '@appdeploy/sdk';
+import { db } from './runtime';
 
 export const OPPORTUNITY_SOURCES = [
   { id: 'pppc', name: 'PPPC procurement adverts', url: 'https://www.pppc.mw/procurement/adverts', kind: 'public' as const },
   { id: 'ppda', name: 'PPDA procurement notices', url: 'https://ppda.mw/tenders', kind: 'public' as const },
   { id: 'maneps', name: 'MANEPS OCDS procurement data', url: 'https://maneps.mw/procurement-notice', kind: 'api' as const },
+  { id: 'careersmw', name: 'Careers Malawi tenders & bids', url: 'https://careersmw.com/tenders-and-non-consultancy-services/', kind: 'public' as const },
 ] as const;
 
 export const OPPORTUNITY_TERMS = [
-  'ict', 'information technology', 'information systems', 'cybersecurity', 'cyber security', 'information security',
-  'penetration testing', 'penetration test', 'vulnerability assessment', 'security assessment', 'security audit',
-  'soc', 'siem', 'endpoint security', 'edr', 'xdr', 'firewall', 'network security', 'identity and access management',
-  'iam', 'zero trust', 'privileged access', 'mfa', 'multi-factor authentication', 'data protection', 'privacy',
-  'digital forensics', 'incident response', 'iso 27001', 'pci dss', 'dlp', 'managed detection', 'managed security',
-  'cloud security', 'backup', 'disaster recovery', 'business continuity', 'cloud', 'data centre', 'data center',
-  'server', 'network', 'router', 'switch', 'wireless', 'internet', 'connectivity', 'structured cabling', 'voip',
-  'telecommunications', 'software', 'application development', 'web development', 'mobile application', 'database',
-  'erp', 'crm', 'api', 'website', 'systems integration', 'digital transformation', 'automation', 'data analytics',
-  'business intelligence', 'artificial intelligence', 'machine learning', 'gis', 'it support', 'technical support',
+  'ict', 'ict equipment', 'ict infrastructure', 'information technology', 'information systems',
+  'cybersecurity', 'cyber security', 'information security', 'penetration testing', 'penetration test',
+  'vulnerability assessment', 'security assessment', 'security audit', 'soc', 'siem', 'endpoint security',
+  'edr', 'xdr', 'firewall', 'network security', 'identity and access management', 'iam', 'zero trust',
+  'privileged access', 'mfa', 'multi-factor authentication', 'data protection', 'privacy', 'digital forensics',
+  'incident response', 'iso 27001', 'pci dss', 'dlp', 'managed detection', 'managed security', 'cloud security',
+  'backup', 'disaster recovery', 'business continuity', 'cloud', 'data centre', 'data center', 'server',
+  'network', 'networking', 'router', 'switch', 'wireless', 'internet', 'connectivity', 'structured cabling',
+  'voip', 'telecommunications', 'software', 'software development', 'application development', 'web development',
+  'mobile application', 'database', 'erp', 'crm', 'api', 'website', 'systems integration', 'digital transformation',
+  'automation', 'data analytics', 'business intelligence', 'artificial intelligence', 'machine learning', 'gis',
+  'it support', 'it consulting', 'it consultancy', 'ict consulting', 'ict consultancy', 'technical support',
   'helpdesk', 'managed services', 'software licence', 'software license', 'licence renewal', 'license renewal',
-  'ict equipment', 'computer', 'laptop', 'cctv', 'access control', 'consultancy', 'consulting', 'advisory',
-  'request for proposal', 'request for proposals', 'request for quotation', 'request for quotations', 'rfp', 'rfq',
-  'expression of interest', 'eoi', 'invitation for bids', 'tender', 'procurement notice', 'framework agreement',
-  'consultation'
+  'computer', 'computer equipment', 'laptop', 'desktop computer', 'printer', 'cctv', 'access control'
 ];
 
 export type Opportunity = {
@@ -57,11 +57,26 @@ export type OpportunityUpdate = Opportunity & {
   importedTenderId?: string;
 };
 
-const CONSTRUCTION_TERMS = ['construction', 'civil works', 'building works', 'road works', 'roads', 'bridge', 'bridges', 'water reticulation', 'plumbing', 'painting', 'roofing', 'masonry', 'carpentry', 'architectural', 'quantity surveying', 'structural engineering', 'mixed-use development'];
-const CYBER_TERMS = new Set(['cybersecurity', 'cyber security', 'information security', 'penetration testing', 'penetration test', 'vulnerability assessment', 'security assessment', 'security audit', 'soc', 'siem', 'endpoint security', 'edr', 'xdr', 'firewall', 'network security', 'identity and access management', 'iam', 'zero trust', 'privileged access', 'mfa', 'multi-factor authentication', 'data protection', 'privacy', 'digital forensics', 'incident response', 'iso 27001', 'pci dss', 'dlp', 'managed detection', 'managed security', 'cloud security']);
+const CONSTRUCTION_TERMS = [
+  'construction', 'civil works', 'building works', 'road works', 'roads', 'bridge', 'bridges',
+  'water reticulation', 'plumbing', 'painting', 'roofing', 'masonry', 'carpentry', 'architectural',
+  'quantity surveying', 'structural engineering', 'mixed-use development', 'ablution block',
+  'rehabilitation works', 'maintenance materials', 'motor vehicles', 'motorcycles', 'stationery',
+  'furniture', 'tyres', 'medical equipment', 'sports equipment', 'apparel', 'tools', 'uniforms'
+];
+const CYBER_TERMS = new Set([
+  'cybersecurity', 'cyber security', 'information security', 'penetration testing', 'penetration test',
+  'vulnerability assessment', 'security assessment', 'security audit', 'soc', 'siem', 'endpoint security',
+  'edr', 'xdr', 'firewall', 'network security', 'identity and access management', 'iam', 'zero trust',
+  'privileged access', 'mfa', 'multi-factor authentication', 'data protection', 'privacy', 'digital forensics',
+  'incident response', 'iso 27001', 'pci dss', 'dlp', 'managed detection', 'managed security', 'cloud security'
+]);
 function matchTerms(value: string) {
   const haystack = value.toLowerCase();
-  return OPPORTUNITY_TERMS.filter(term => haystack.includes(term)).slice(0, 12);
+  return OPPORTUNITY_TERMS.filter(term => {
+    const escaped = term.replace(/[.*+?^()|[\]\\]/g, '\\$&');
+    return new RegExp('(^|[^a-z0-9])' + escaped + '(?=$|[^a-z0-9])', 'i').test(haystack);
+  }).slice(0, 12);
 }
 function isRelevant(title: string, description: string, category: string) {
   const primary = `${title} ${description} ${category}`.toLowerCase();
@@ -73,6 +88,53 @@ function isRelevant(title: string, description: string, category: string) {
 
 function text(value: unknown) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function absoluteUrl(value: string, base: string) {
+  try {
+    return new URL(value, base).toString();
+  } catch {
+    return '';
+  }
+}
+
+function extractArticleTitle(html: string) {
+  const og = html.match(/<meta[^>]+property=[\"']og:title[\"'][^>]+content=[\"']([^\"']+)[\"']/i)?.[1];
+  if (og) return decodeHtml(og);
+  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+  if (h1) return decodeHtml(h1);
+  return '';
+}
+
+function extractArticleText(html: string) {
+  return decodeHtml(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+  );
+}
+
+function extractDeadline(value: string) {
+  const context = value.match(/(?:deadline|closing\s+date|closing|submission\s+deadline|proposal\s+due\s+date|bid\s+submission\s+date|expiry\s+date|due\s+date)[^\n]{0,220}/i)?.[0] || value;
+  return extractDate(context);
+}
+
+function extractReference(value: string) {
+  const match = value.match(/(?:procurement\s+reference(?:\s+number)?|reference\s*(?:number|no\.?))\s*[:#-]?\s*([A-Z0-9][A-Z0-9/_ .-]{3,100})/i);
+  return match ? match[1].replace(/\s+/g, ' ').trim().replace(/[.,;:]+$/, '') : '';
+}
+
+function extractOrganisation(value: string) {
+  const patterns = [
+    /(?:employer|procuring\s+entity|contracting\s+authority|procurement\s+entity|purchasing\s+entity)\s*[:\-]\s*([^.;\n]{3,160})/i,
+    /(?:Malawi\s+Revenue\s+Authority|Electricity\s+Supply\s+Corporation\s+of\s+Malawi(?:\s+Limited)?|Banja\s+La\s+Mtsogolo|University\s+of\s+Malawi|National\s+Food\s+Reserve\s+Agency)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match) return (match[1] || match[0]).replace(/\s+/g, ' ').trim();
+  }
+  return '';
 }
 
 function firstString(...values: unknown[]) {
@@ -183,7 +245,7 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
       body: JSON.stringify({ skip: 0, take: 250 }),
     });
     const items = Array.isArray(index?.items) ? index.items : [];
-    const details = await Promise.all(items.slice(0, 120).map(async item => {
+    const details = await Promise.all(items.slice(0, 120).map(async (item: any) => {
       const ocid = text(item?.ocid);
       if (!ocid) return null;
       try {
@@ -196,7 +258,7 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
         }
       }
     }));
-    const notices = details.flatMap(payload => extractOcdsCandidates(payload).map(candidate => normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference))).filter((item): item is Opportunity => Boolean(item)));
+    const notices = details.flatMap((payload: unknown) => extractOcdsCandidates(payload).map(candidate => normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference))).filter((item): item is Opportunity => Boolean(item)));
     const unique = new Map<string, Opportunity>();
     for (const item of notices) unique.set(`${item.reference}|${item.url}|${item.title}`.toLowerCase(), item);
     return {
@@ -221,42 +283,172 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
   }
 }
 
+function decodeHtml(value: string) {
+  return value
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/(p|div|li|td|th|tr|h[1-6])>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractDate(value: string) {
+  const normalized = value.replace(/(\d{1,2})(st|nd|rd|th)/gi, '$1');
+  const patterns = [
+    /\b\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?)?\b/,
+    /\b\d{1,2}[\/-]\d{1,2}[\/-]\d{4}\b/,
+    /\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}\b/i,
+    /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match) {
+      const parsed = new Date(match[0]).getTime();
+      if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+    }
+  }
+  return '';
+}
+
+function extractPublicRows(html: string) {
+  const rows: Array<{ cells: string[]; links: string[] }> = [];
+  const rowMatches = html.match(/<tr[\s\S]*?<\/tr>/gi) || [];
+  for (const row of rowMatches) {
+    const cells = (row.match(/<(?:td|th)[^>]*>[\s\S]*?<\/(?:td|th)>/gi) || []).map(decodeHtml).filter(Boolean);
+    if (cells.length < 2) continue;
+    const links = Array.from(row.matchAll(/href\s*=\s*["']([^"']+)["']/gi)).map(match => match[1]);
+    rows.push({ cells, links });
+  }
+  return rows;
+}
+
+function publicCandidates(html: string, source: typeof OPPORTUNITY_SOURCES[number]) {
+  const candidates: Array<Record<string, unknown>> = [];
+  for (const row of extractPublicRows(html)) {
+    const joined = row.cells.join(' ');
+    const lower = joined.toLowerCase();
+    if (/title|institution|reference|publish date|closing date/.test(lower) && row.cells.every(cell => /title|institution|reference|publish|closing/i.test(cell))) continue;
+
+    const deadlineMatch = joined.match(/(?:closing|submission|deadline|due)[^.;]{0,80}/i);
+    const deadline = extractDate(deadlineMatch?.[0] || row.cells[row.cells.length - 1] || '');
+    const title = row.cells[0] || '';
+    const organisation = row.cells[1] || '';
+    const reference = row.cells[2] || '';
+    const publishedAt = extractDate(row.cells[3] || '');
+    const description = row.cells.slice(0, 5).join(' — ');
+    const url = row.links.find(link => /pdf|doc|download|notice|tender/i.test(link)) || row.links[0] || source.url;
+
+    candidates.push({ title, organisation, reference, deadline, publishedAt, description, noticeType: 'Procurement notice', url });
+  }
+
+  if (!candidates.length) {
+    const linkMatches = Array.from(html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi));
+    for (const match of linkMatches) {
+      const title = decodeHtml(match[2]);
+      if (title.length < 20 || title.length > 240) continue;
+      candidates.push({ title, organisation: '', reference: '', deadline: extractDate(title), description: title, noticeType: 'Procurement notice', url: match[1] });
+    }
+  }
+  return candidates;
+}
+
+async function scanCareersMw(): Promise<OpportunitySourceResult> {
+  const source = OPPORTUNITY_SOURCES.find(item => item.id === 'careersmw')!;
+  try {
+    const html = await fetchText(source.url);
+    const links = Array.from(html.matchAll(/<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>([\s\S]*?)<\/a>/gi))
+      .map(match => ({ url: absoluteUrl(match[1], source.url), title: decodeHtml(match[2]) }))
+      .filter(item => item.url.startsWith('https://careersmw.com/') && item.url !== source.url && item.title.length >= 12)
+      .filter(item => !/\/page\/\d+\/?$|\/category\/|\/tag\//i.test(item.url));
+    const uniqueLinks = Array.from(new Map(links.map(item => [item.url, item])).values()).slice(0, 60);
+    const pages = await Promise.all(uniqueLinks.map(async link => {
+      try {
+        return { link, html: await fetchText(link.url) };
+      } catch {
+        return null;
+      }
+    }));
+    const notices = pages.flatMap(item => {
+      if (!item) return [];
+      const articleText = extractArticleText(item.html);
+      const title = extractArticleTitle(item.html) || item.link.title;
+      const deadline = extractDeadline(articleText);
+      const candidate = {
+        title,
+        organisation: extractOrganisation(articleText),
+        reference: extractReference(articleText),
+        deadline,
+        description: articleText.slice(0, 8000),
+        noticeType: 'Tender / bid / consultancy',
+        url: item.link.url,
+      };
+      const normalized = normalizeCandidate(candidate, source.id, source.name, source.url);
+      return normalized ? [normalized] : [];
+    });
+    const unique = new Map<string, Opportunity>();
+    for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
+    return {
+      sourceId: source.id,
+      source: source.name,
+      sourceUrl: source.url,
+      status: 'ok',
+      accessMethod: 'public-page',
+      notices: Array.from(unique.values()).slice(0, 80),
+      message: 'Careers Malawi exposed ' + uniqueLinks.length + ' tender/bid pages; ' + unique.size + ' matched the ICT/cybersecurity opportunity rules.',
+    };
+  } catch {
+    return {
+      sourceId: source.id,
+      source: source.name,
+      sourceUrl: source.url,
+      status: 'error',
+      accessMethod: 'public-page',
+      notices: [],
+      message: 'Careers Malawi could not be scanned right now.',
+    };
+  }
+}
+
+async function fetchText(url: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'text/html,application/xhtml+xml' },
+    });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    return await response.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function scanPublicPage(source: typeof OPPORTUNITY_SOURCES[number]): Promise<OpportunitySourceResult> {
   try {
-    const scraped = await ai.scrape({ url: source.url });
-    const content = text(scraped.text).slice(0, 70000);
-    if (content.length < 120) {
+    const html = (await fetchText(source.url)).slice(0, 250000);
+    if (html.length < 120) {
       return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'error', accessMethod: 'public-page', notices: [], message: 'The public page did not expose enough procurement content for extraction.' };
     }
-    const extracted = await ai.extract({
-      content,
-      prompt: `Extract current procurement opportunities relevant to an ICT and cybersecurity company from ${source.name}. Include tenders, bids, RFPs, RFQs, expressions of interest, consultancy, advisory services, technology consultations, software, data, networking, infrastructure, telecommunications and security opportunities. Do not invent missing values. Exclude clearly unrelated opportunities.`,
-      schema: {
-        type: 'object',
-        properties: {
-          notices: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                title: { type: 'string' }, organisation: { type: 'string' }, reference: { type: 'string' },
-                deadline: { type: 'string' }, description: { type: 'string' }, noticeType: { type: 'string' }, url: { type: 'string' },
-              },
-              required: ['title'],
-            },
-          },
-        },
-        required: ['notices'],
-      },
-      maxTokens: 6000,
-      thinkingMode: 'FAST',
-    });
-    const extractedData = extracted.data as { notices?: unknown[] } | undefined;
-    const raw = Array.isArray(extractedData?.notices) ? extractedData.notices : [];
-    const notices = raw.map(item => normalizeCandidate(item as Record<string, unknown>, source.id, source.name, source.url)).filter((item): item is Opportunity => Boolean(item));
+
+    const raw = publicCandidates(html, source);
+    const notices = raw.map(item => normalizeCandidate(item, source.id, source.name, source.url)).filter((item): item is Opportunity => Boolean(item));
     const unique = new Map<string, Opportunity>();
-    for (const item of notices) unique.set(`${item.reference}|${item.url}|${item.title}`.toLowerCase(), item);
-    return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'ok', accessMethod: 'public-page', notices: Array.from(unique.values()).slice(0, 80), message: `Found ${unique.size} relevant opportunities in the accessible public page.` };
+    for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
+
+    return {
+      sourceId: source.id,
+      source: source.name,
+      sourceUrl: source.url,
+      status: 'ok',
+      accessMethod: 'public-page',
+      notices: Array.from(unique.values()).slice(0, 80),
+      message: 'Found ' + unique.size + ' relevant opportunities using deterministic public-page extraction. Missing values are left blank rather than inferred.',
+    };
   } catch {
     return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'error', accessMethod: 'public-page', notices: [], message: 'The public source could not be scanned right now.' };
   }
@@ -265,7 +457,8 @@ async function scanPublicPage(source: typeof OPPORTUNITY_SOURCES[number]): Promi
 export async function discoverPlatformOpportunities() {
   const results: OpportunitySourceResult[] = [];
   results.push(await scanManeps());
-  for (const source of OPPORTUNITY_SOURCES.filter(item => item.id !== 'maneps')) results.push(await scanPublicPage(source));
+  results.push(await scanCareersMw());
+  for (const source of OPPORTUNITY_SOURCES.filter(item => item.id !== 'maneps' && item.id !== 'careersmw')) results.push(await scanPublicPage(source));
   return results;
 }
 
@@ -294,8 +487,23 @@ export async function persistOpportunityUpdates(results: OpportunitySourceResult
 
 export async function listOpportunityUpdates(limit = 30) {
   const result = await db.list<OpportunityUpdate>('opportunity_updates', { limit: 500 });
-  const current = result.items.filter(item => { if (item.state === 'dismissed') return false; if (!item.deadline) return true; const time = new Date(item.deadline).getTime(); return Number.isFinite(time) && time >= Date.now(); });
+  const current = result.items
+    .map(item => {
+      const relevance = isRelevant(text(item.title), text(item.description), '');
+      return { ...item, matchedTerms: relevance.matched, _relevant: relevance.accept };
+    })
+    .filter(item => {
+      if (item.state === 'dismissed' || !item._relevant) return false;
+      if (!item.deadline) return true;
+      const time = new Date(item.deadline).getTime();
+      return Number.isFinite(time) && time >= Date.now();
+    });
   const byReference = new Map<string, Set<string>>();
   for (const item of current) { const reference = text(item.reference).toLowerCase(); if (!reference) continue; const sources = byReference.get(reference) || new Set<string>(); sources.add(item.source); byReference.set(reference, sources); }
-  return current.sort((a, b) => new Date(b.lastSeenAt || b.firstSeenAt).getTime() - new Date(a.lastSeenAt || a.firstSeenAt).getTime()).slice(0, limit).map(item => { const reference = text(item.reference).toLowerCase(); const sources = reference ? Array.from(byReference.get(reference) || []).filter(source => source !== item.source) : []; return { ...item, alsoListedOn: sources }; });
+  return current.sort((a, b) => new Date(b.lastSeenAt || b.firstSeenAt).getTime() - new Date(a.lastSeenAt || a.firstSeenAt).getTime()).slice(0, limit).map(item => {
+    const { _relevant: _ignored, ...clean } = item;
+    const reference = text(item.reference).toLowerCase();
+    const sources = reference ? Array.from(byReference.get(reference) || []).filter(source => source !== item.source) : [];
+    return { ...clean, alsoListedOn: sources };
+  });
 }
