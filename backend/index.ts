@@ -1,5 +1,4 @@
-import { ai, db } from '@appdeploy/sdk';
-import { router, json, error, requireAuth, type RouterContext } from '@appdeploy/sdk';
+import { db, router, json, error, requireAuth, type RouterContext } from './runtime';
 import { storageService } from './storage';
 import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES } from './opportunity-discovery';
 import { verifyOpportunity } from './opportunity-verification';
