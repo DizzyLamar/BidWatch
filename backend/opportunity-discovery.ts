@@ -7,21 +7,20 @@ export const OPPORTUNITY_SOURCES = [
 ] as const;
 
 export const OPPORTUNITY_TERMS = [
-  'ict', 'information technology', 'information systems', 'cybersecurity', 'cyber security', 'information security',
-  'penetration testing', 'penetration test', 'vulnerability assessment', 'security assessment', 'security audit',
-  'soc', 'siem', 'endpoint security', 'edr', 'xdr', 'firewall', 'network security', 'identity and access management',
-  'iam', 'zero trust', 'privileged access', 'mfa', 'multi-factor authentication', 'data protection', 'privacy',
-  'digital forensics', 'incident response', 'iso 27001', 'pci dss', 'dlp', 'managed detection', 'managed security',
-  'cloud security', 'backup', 'disaster recovery', 'business continuity', 'cloud', 'data centre', 'data center',
-  'server', 'network', 'router', 'switch', 'wireless', 'internet', 'connectivity', 'structured cabling', 'voip',
-  'telecommunications', 'software', 'application development', 'web development', 'mobile application', 'database',
-  'erp', 'crm', 'api', 'website', 'systems integration', 'digital transformation', 'automation', 'data analytics',
-  'business intelligence', 'artificial intelligence', 'machine learning', 'gis', 'it support', 'technical support',
+  'ict', 'ict equipment', 'ict infrastructure', 'information technology', 'information systems',
+  'cybersecurity', 'cyber security', 'information security', 'penetration testing', 'penetration test',
+  'vulnerability assessment', 'security assessment', 'security audit', 'soc', 'siem', 'endpoint security',
+  'edr', 'xdr', 'firewall', 'network security', 'identity and access management', 'iam', 'zero trust',
+  'privileged access', 'mfa', 'multi-factor authentication', 'data protection', 'privacy', 'digital forensics',
+  'incident response', 'iso 27001', 'pci dss', 'dlp', 'managed detection', 'managed security', 'cloud security',
+  'backup', 'disaster recovery', 'business continuity', 'cloud', 'data centre', 'data center', 'server',
+  'network', 'networking', 'router', 'switch', 'wireless', 'internet', 'connectivity', 'structured cabling',
+  'voip', 'telecommunications', 'software', 'software development', 'application development', 'web development',
+  'mobile application', 'database', 'erp', 'crm', 'api', 'website', 'systems integration', 'digital transformation',
+  'automation', 'data analytics', 'business intelligence', 'artificial intelligence', 'machine learning', 'gis',
+  'it support', 'it consulting', 'it consultancy', 'ict consulting', 'ict consultancy', 'technical support',
   'helpdesk', 'managed services', 'software licence', 'software license', 'licence renewal', 'license renewal',
-  'ict equipment', 'computer', 'laptop', 'cctv', 'access control', 'consultancy', 'consulting', 'advisory',
-  'request for proposal', 'request for proposals', 'request for quotation', 'request for quotations', 'rfp', 'rfq',
-  'expression of interest', 'eoi', 'invitation for bids', 'tender', 'procurement notice', 'framework agreement',
-  'consultation'
+  'computer', 'computer equipment', 'laptop', 'desktop computer', 'printer', 'cctv', 'access control'
 ];
 
 export type Opportunity = {
@@ -57,11 +56,26 @@ export type OpportunityUpdate = Opportunity & {
   importedTenderId?: string;
 };
 
-const CONSTRUCTION_TERMS = ['construction', 'civil works', 'building works', 'road works', 'roads', 'bridge', 'bridges', 'water reticulation', 'plumbing', 'painting', 'roofing', 'masonry', 'carpentry', 'architectural', 'quantity surveying', 'structural engineering', 'mixed-use development'];
-const CYBER_TERMS = new Set(['cybersecurity', 'cyber security', 'information security', 'penetration testing', 'penetration test', 'vulnerability assessment', 'security assessment', 'security audit', 'soc', 'siem', 'endpoint security', 'edr', 'xdr', 'firewall', 'network security', 'identity and access management', 'iam', 'zero trust', 'privileged access', 'mfa', 'multi-factor authentication', 'data protection', 'privacy', 'digital forensics', 'incident response', 'iso 27001', 'pci dss', 'dlp', 'managed detection', 'managed security', 'cloud security']);
+const CONSTRUCTION_TERMS = [
+  'construction', 'civil works', 'building works', 'road works', 'roads', 'bridge', 'bridges',
+  'water reticulation', 'plumbing', 'painting', 'roofing', 'masonry', 'carpentry', 'architectural',
+  'quantity surveying', 'structural engineering', 'mixed-use development', 'ablution block',
+  'rehabilitation works', 'maintenance materials', 'motor vehicles', 'motorcycles', 'stationery',
+  'furniture', 'tyres', 'medical equipment', 'sports equipment', 'apparel', 'tools', 'uniforms'
+];
+const CYBER_TERMS = new Set([
+  'cybersecurity', 'cyber security', 'information security', 'penetration testing', 'penetration test',
+  'vulnerability assessment', 'security assessment', 'security audit', 'soc', 'siem', 'endpoint security',
+  'edr', 'xdr', 'firewall', 'network security', 'identity and access management', 'iam', 'zero trust',
+  'privileged access', 'mfa', 'multi-factor authentication', 'data protection', 'privacy', 'digital forensics',
+  'incident response', 'iso 27001', 'pci dss', 'dlp', 'managed detection', 'managed security', 'cloud security'
+]);
 function matchTerms(value: string) {
   const haystack = value.toLowerCase();
-  return OPPORTUNITY_TERMS.filter(term => haystack.includes(term)).slice(0, 12);
+  return OPPORTUNITY_TERMS.filter(term => {
+    const escaped = term.replace(/[.*+?^()|[\]\\]/g, '\\$&');
+    return new RegExp('(^|[^a-z0-9])' + escaped + '(?=$|[^a-z0-9])', 'i').test(haystack);
+  }).slice(0, 12);
 }
 function isRelevant(title: string, description: string, category: string) {
   const primary = `${title} ${description} ${category}`.toLowerCase();
@@ -367,8 +381,23 @@ export async function persistOpportunityUpdates(results: OpportunitySourceResult
 
 export async function listOpportunityUpdates(limit = 30) {
   const result = await db.list<OpportunityUpdate>('opportunity_updates', { limit: 500 });
-  const current = result.items.filter(item => { if (item.state === 'dismissed') return false; if (!item.deadline) return true; const time = new Date(item.deadline).getTime(); return Number.isFinite(time) && time >= Date.now(); });
+  const current = result.items
+    .map(item => {
+      const relevance = isRelevant(text(item.title), text(item.description), '');
+      return { ...item, matchedTerms: relevance.matched, _relevant: relevance.accept };
+    })
+    .filter(item => {
+      if (item.state === 'dismissed' || !item._relevant) return false;
+      if (!item.deadline) return true;
+      const time = new Date(item.deadline).getTime();
+      return Number.isFinite(time) && time >= Date.now();
+    });
   const byReference = new Map<string, Set<string>>();
   for (const item of current) { const reference = text(item.reference).toLowerCase(); if (!reference) continue; const sources = byReference.get(reference) || new Set<string>(); sources.add(item.source); byReference.set(reference, sources); }
-  return current.sort((a, b) => new Date(b.lastSeenAt || b.firstSeenAt).getTime() - new Date(a.lastSeenAt || a.firstSeenAt).getTime()).slice(0, limit).map(item => { const reference = text(item.reference).toLowerCase(); const sources = reference ? Array.from(byReference.get(reference) || []).filter(source => source !== item.source) : []; return { ...item, alsoListedOn: sources }; });
+  return current.sort((a, b) => new Date(b.lastSeenAt || b.firstSeenAt).getTime() - new Date(a.lastSeenAt || a.firstSeenAt).getTime()).slice(0, limit).map(item => {
+    const { _relevant: _ignored, ...clean } = item;
+    const reference = text(item.reference).toLowerCase();
+    const sources = reference ? Array.from(byReference.get(reference) || []).filter(source => source !== item.source) : [];
+    return { ...clean, alsoListedOn: sources };
+  });
 }
