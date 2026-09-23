@@ -4,6 +4,7 @@ export const OPPORTUNITY_SOURCES = [
   { id: 'pppc', name: 'PPPC procurement adverts', url: 'https://www.pppc.mw/procurement/adverts', kind: 'public' as const },
   { id: 'ppda', name: 'PPDA procurement notices', url: 'https://ppda.mw/tenders', kind: 'public' as const },
   { id: 'maneps', name: 'MANEPS OCDS procurement data', url: 'https://maneps.mw/procurement-notice', kind: 'api' as const },
+  { id: 'careersmw', name: 'Careers Malawi tenders & bids', url: 'https://careersmw.com/tenders-and-non-consultancy-services/', kind: 'public' as const },
 ] as const;
 
 export const OPPORTUNITY_TERMS = [
@@ -87,6 +88,48 @@ function isRelevant(title: string, description: string, category: string) {
 
 function text(value: unknown) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function absoluteUrl(value: string, base: string) {
+  try {
+    return new URL(value, base).toString();
+  } catch {
+    return '';
+  }
+}
+
+function extractArticleTitle(html: string) {
+  const og = html.match(/<meta[^>]+property=[\"']og:title[\"'][^>]+content=[\"']([^\"']+)[\"']/i)?.[1];
+  if (og) return decodeHtml(og);
+  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+  if (h1) return decodeHtml(h1);
+  return '';
+}
+
+function extractArticleText(html: string) {
+  return decodeHtml(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+  );
+}
+
+function extractReference(value: string) {
+  const match = value.match(/(?:procurement\s+reference(?:\s+number)?|reference\s*(?:number|no\.?))\s*[:#-]?\s*([A-Z0-9][A-Z0-9/_ .-]{3,100})/i);
+  return match ? match[1].replace(/\s+/g, ' ').trim().replace(/[.,;:]+$/, '') : '';
+}
+
+function extractOrganisation(value: string) {
+  const patterns = [
+    /(?:employer|procuring\s+entity|contracting\s+authority|procurement\s+entity|purchasing\s+entity)\s*[:\-]\s*([^.;\n]{3,160})/i,
+    /(?:Malawi\s+Revenue\s+Authority|Electricity\s+Supply\s+Corporation\s+of\s+Malawi(?:\s+Limited)?|Banja\s+La\s+Mtsogolo|University\s+of\s+Malawi|National\s+Food\s+Reserve\s+Agency)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match) return (match[1] || match[0]).replace(/\s+/g, ' ').trim();
+  }
+  return '';
 }
 
 function firstString(...values: unknown[]) {
@@ -308,6 +351,63 @@ function publicCandidates(html: string, source: typeof OPPORTUNITY_SOURCES[numbe
   return candidates;
 }
 
+async function scanCareersMw(): Promise<OpportunitySourceResult> {
+  const source = OPPORTUNITY_SOURCES.find(item => item.id === 'careersmw')!;
+  try {
+    const html = await fetchText(source.url);
+    const links = Array.from(html.matchAll(/<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>([\s\S]*?)<\/a>/gi))
+      .map(match => ({ url: absoluteUrl(match[1], source.url), title: decodeHtml(match[2]) }))
+      .filter(item => item.url.startsWith('https://careersmw.com/') && item.url !== source.url && item.title.length >= 12)
+      .filter(item => !/\/page\/\d+\/?$|\/category\/|\/tag\//i.test(item.url));
+    const uniqueLinks = Array.from(new Map(links.map(item => [item.url, item])).values()).slice(0, 60);
+    const pages = await Promise.all(uniqueLinks.map(async link => {
+      try {
+        return { link, html: await fetchText(link.url) };
+      } catch {
+        return null;
+      }
+    }));
+    const notices = pages.flatMap(item => {
+      if (!item) return [];
+      const articleText = extractArticleText(item.html);
+      const title = extractArticleTitle(item.html) || item.link.title;
+      const deadline = extractDate(articleText);
+      const candidate = {
+        title,
+        organisation: extractOrganisation(articleText),
+        reference: extractReference(articleText),
+        deadline,
+        description: articleText.slice(0, 8000),
+        noticeType: 'Tender / bid / consultancy',
+        url: item.link.url,
+      };
+      const normalized = normalizeCandidate(candidate, source.id, source.name, source.url);
+      return normalized ? [normalized] : [];
+    });
+    const unique = new Map<string, Opportunity>();
+    for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
+    return {
+      sourceId: source.id,
+      source: source.name,
+      sourceUrl: source.url,
+      status: 'ok',
+      accessMethod: 'public-page',
+      notices: Array.from(unique.values()).slice(0, 80),
+      message: 'Careers Malawi exposed ' + uniqueLinks.length + ' tender/bid pages; ' + unique.size + ' matched the ICT/cybersecurity opportunity rules.',
+    };
+  } catch {
+    return {
+      sourceId: source.id,
+      source: source.name,
+      sourceUrl: source.url,
+      status: 'error',
+      accessMethod: 'public-page',
+      notices: [],
+      message: 'Careers Malawi could not be scanned right now.',
+    };
+  }
+}
+
 async function fetchText(url: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
@@ -352,7 +452,8 @@ async function scanPublicPage(source: typeof OPPORTUNITY_SOURCES[number]): Promi
 export async function discoverPlatformOpportunities() {
   const results: OpportunitySourceResult[] = [];
   results.push(await scanManeps());
-  for (const source of OPPORTUNITY_SOURCES.filter(item => item.id !== 'maneps')) results.push(await scanPublicPage(source));
+  results.push(await scanCareersMw());
+  for (const source of OPPORTUNITY_SOURCES.filter(item => item.id !== 'maneps' && item.id !== 'careersmw')) results.push(await scanPublicPage(source));
   return results;
 }
 
