@@ -212,7 +212,7 @@ For every feature or significant fix:
 5. Implement backend authorization and data lifecycle rules.
 6. Implement the frontend workflow and recovery states.
 7. Run typecheck, repository tests and the production build.
-8. Deploy to AppDeploy.
+8. Deploy through Render after CI passes.
 9. Review runtime errors and black-box QA.
 10. Fix and redeploy if required.
 11. Synchronize the deployed application source into GitHub.
@@ -280,9 +280,9 @@ npm run build
 Live application
 :
 
-`https://bidwatch-q2u0th.v2.appdeploy.ai/`
+`https://bidwatch.onrender.com/`
 
-AppDeploy provides the hosted runtime, database, storage, authentication and deployed QA layer. GitHub provides source control and CI/CD.
+Render provides the hosted web service. Supabase provides authentication, database and private storage. GitHub provides source control and CI verification.
 
 The repository should be private before BidWatch is used as a real company source repository. Never commit credentials, production data, customer documents or sensitive infrastructure details.
 
