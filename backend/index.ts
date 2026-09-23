@@ -139,55 +139,6 @@ function opportunityMatch(textValue: string) {
   return OPPORTUNITY_TERMS.filter(term => haystack.includes(term)).slice(0, 12);
 }
 
-async function scrapeOpportunities() {
-  const results: Array<Record<string, unknown>> = [];
-  for (const source of OPPORTUNITY_SOURCES) {
-    try {
-      const scraped = await ai.scrape({ url: source.url });
-      const textContent = String(scraped.text || '').slice(0, 50000);
-      const looksAuthenticated = source.kind === 'portal' && /\blogin\b|\bsign up\b|\bpassword\b/i.test(textContent) && !/procurement notice|tender notice|closing date|deadline/i.test(textContent);
-      if (looksAuthenticated || textContent.length < 120) {
-        results.push({ sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'authentication_required', notices: [], message: 'The source did not expose usable procurement notices to the server scraper. MANEPS may require an authenticated vendor session.' });
-        continue;
-      }
-      const extracted = await ai.extract({
-        content: textContent,
-        prompt: `Extract procurement opportunities relevant to an ICT and cybersecurity company. Include tenders, bids, RFPs, RFQs, expressions of interest, consultancy opportunities, procurement notices and technology-related consultations. Do not invent missing values. Keep only opportunities whose title or description has a plausible ICT, cybersecurity, software, infrastructure, networking, data, digital transformation, IT support, telecommunications or related technology scope. Source: ${source.name}.`,
-        schema: {
-          type: 'object',
-          properties: {
-            notices: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  title: { type: 'string' }, organisation: { type: 'string' }, reference: { type: 'string' },
-                  deadline: { type: 'string' }, description: { type: 'string' }, noticeType: { type: 'string' }, url: { type: 'string' }
-                },
-                required: ['title']
-              }
-            }
-          },
-          required: ['notices']
-        },
-        maxTokens: 4096,
-        thinkingMode: 'FAST'
-      });
-      const notices = Array.isArray((extracted.data as { notices?: unknown[] })?.notices) ? (extracted.data as { notices: unknown[] }).notices : [];
-      const normalized = notices.map((item) => {
-        const n = (item || {}) as Record<string, unknown>;
-        const combined = [n.title, n.organisation, n.reference, n.description, n.noticeType].filter(Boolean).join(' ');
-        const matches = opportunityMatch(combined);
-        return { ...n, sourceId: source.id, source: source.name, sourceUrl: source.url, matchedTerms: matches, matched: matches.length > 0 };
-      }).filter((n) => n.matched);
-      results.push({ sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'ok', notices: normalized, message: normalized.length ? `Found ${normalized.length} relevant opportunities.` : 'No relevant ICT or cybersecurity opportunities were found in the accessible source content.' });
-    } catch (err) {
-      results.push({ sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'error', notices: [], message: 'The source could not be scanned right now.' });
-    }
-  }
-  return results;
-}
-
 async function listAll<T>(table: string, limit = 500) { const r = await db.list<T>(table, { limit }); return r.items; }
 async function getById<T>(table: string, id: string) { const [r] = await db.get<T>(table, [id]); return r ? { ...(r as T), id } : null; }
 function text(value: unknown, field: string, fallback = '') { const s = String(value ?? fallback).trim(); return s.slice(0, MAX_TEXT[field] ?? 500); }
