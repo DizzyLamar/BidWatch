@@ -1,5 +1,11 @@
 [
   {
+    "name": "procurement-source-sync",
+    "cron": "*/30 * * * *",
+    "handler": "procurementDiscoveryHandler",
+    "timezone": "Africa/Blantyre"
+  },
+  {
     "name": "bid-deadline-reminders",
     "cron": "0 7 * * *",
     "handler": "reminderHandler",
