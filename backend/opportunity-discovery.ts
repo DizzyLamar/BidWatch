@@ -399,7 +399,9 @@ function extractOcdsCandidates(payload: unknown): Array<Record<string, unknown>>
 }
 
 async function scanManeps(): Promise<OpportunitySourceResult> {
-  const source = OPPORTUNITY_SOURCES.find(item => item.id === 'maneps')!; const apiBase = 'https://maneps.mw/rms/api/ocds';
+  const source = OPPORTUNITY_SOURCES.find(item => item.id === 'maneps')!;
+  const started = Date.now();
+  const apiBase = 'https://maneps.mw/rms/api/ocds';
   try {
     const index = await fetchJson(apiBase + '/get-records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skip: 0, take: 250 }) });
     const items = Array.isArray(index?.items) ? index.items : [];
@@ -410,32 +412,9 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
     }));
     const notices = details.flatMap(payload => extractOcdsCandidates(payload).map(candidate => normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference))).filter((item): item is Opportunity => Boolean(item)));
     const unique = new Map<string, Opportunity>(); for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
-    return sourceResult(source, Date.now() - 1, items.length, items.length, Array.from(unique.values()).slice(0, 100), 0, 'MANePS OCDS API returned ' + items.length + ' records; ' + unique.size + ' matched the technology classifier.', 'ok', 'public-ocds-api');
+    return sourceResult(source, started, items.length, items.length, Array.from(unique.values()).slice(0, 100), 0, 'MANePS OCDS API returned ' + items.length + ' records; ' + unique.size + ' matched the technology classifier.', 'ok', 'public-ocds-api');
   } catch {
-    return sourceResult(source, Date.now() - 1, 0, 0, [], 1, 'MANePS public OCDS endpoint could not be reached. BidWatch did not use a supplier login or browser session.', 'error', 'public-ocds-api');
-  }
-}
-
-async function scanPublicPage(source: typeof OPPORTUNITY_SOURCES[number]): Promise<OpportunitySourceResult> {
-  try {
-    const content = await scrapePage(source.url);
-    if (content.length < 120) return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'error', accessMethod: 'public-page', notices: [], message: 'The public page did not expose enough procurement content for extraction.' };
-    const extracted = await ai.extract({
-      content,
-      prompt: 'Extract current technology-related procurement opportunities from this source, including software, data, networking, infrastructure, telecommunications, cybersecurity, ICT support and technology consultancy. Do not invent missing values and exclude clearly unrelated opportunities.',
-      schema: {
-        type: 'object', properties: { notices: { type: 'array', items: { type: 'object', properties: {
-          title: { type: 'string' }, organisation: { type: 'string' }, reference: { type: 'string' }, deadline: { type: 'string' },
-          description: { type: 'string' }, scope: { type: 'string' }, requirements: { type: 'string' }, noticeType: { type: 'string' }, url: { type: 'string' },
-        }, required: ['title'] } } }, required: ['notices'],
-      }, maxTokens: 7000, thinkingMode: 'FAST',
-    });
-    const raw = Array.isArray((extracted.data as { notices?: unknown[] } | undefined)?.notices) ? (extracted.data as { notices: unknown[] }).notices : [];
-    const notices = raw.map(item => normalizeCandidate(item as Record<string, unknown>, source.id, source.name, source.url)).filter((item): item is Opportunity => Boolean(item));
-    const unique = new Map<string, Opportunity>(); for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
-    return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'ok', accessMethod: 'public-page', notices: Array.from(unique.values()).slice(0, 80), message: 'Found ' + unique.size + ' relevant opportunities in the accessible public page.' };
-  } catch (error) {
-    return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'error', accessMethod: 'public-page', notices: [], message: 'The public source could not be scanned: ' + (error instanceof Error ? error.message : 'unknown error') };
+    return sourceResult(source, started, 0, 0, [], 1, 'MANePS public OCDS endpoint could not be reached. BidWatch did not use a supplier login or browser session.', 'error', 'public-ocds-api');
   }
 }
 
