@@ -1,10 +1,10 @@
-import { ai, db } from '@appdeploy/sdk';
+import { db } from '@appdeploy/sdk';
 
 export const OPPORTUNITY_SOURCES = [
-  { id: 'careersmw', name: 'Careers Malawi tenders', url: 'https://careersmw.com/tenders-and-non-consultancy-services/', kind: 'public' as const },
-  { id: 'pppc', name: 'PPPC procurement adverts', url: 'https://www.pppc.mw/procurement/adverts', kind: 'public' as const },
+  { id: 'maneps', name: 'MANePS procurement notices', url: 'https://maneps.mw/procurement-notice', kind: 'api' as const },
   { id: 'ppda', name: 'PPDA procurement notices', url: 'https://ppda.mw/tenders', kind: 'public' as const },
-  { id: 'maneps', name: 'MANEPS OCDS procurement data', url: 'https://maneps.mw/procurement-notice', kind: 'api' as const },
+  { id: 'malawi-gov', name: 'Malawi Government tenders', url: 'https://www.malawi.gov.mw/index.php/resources/publications/tenders', kind: 'public' as const },
+  { id: 'careersmw', name: 'Careers Malawi tenders & bids', url: 'https://careersmw.com/tenders-and-non-consultancy-services/', kind: 'public' as const },
 ] as const;
 
 export type RelevanceLevel = 'high' | 'medium' | 'low';
@@ -25,7 +25,7 @@ type Classification = {
 
 const CATEGORY_TERMS: Record<CapabilityCategory, string[]> = {
   'Software & Development': ['software development','application development','web development','mobile application','mobile app','software implementation','system development','information system','management information system','mis','erp','crm','api','systems integration','database','web portal','website','digital platform','automation'],
-  Cybersecurity: ['cybersecurity','cyber security','information security','penetration testing','penetration test','vulnerability assessment','security assessment','security audit','soc','siem','endpoint security','edr','xdr','firewall','network security','identity and access management','iam','zero trust','privileged access','mfa','multi-factor authentication','data protection','privacy','digital forensics','incident response','iso 27001','pci dss','dlp','managed detection','managed security','cloud security','access control','biometric','cctv','surveillance'],
+  Cybersecurity: ['cybersecurity','cyber security','information security','penetration testing','penetration test','vulnerability assessment','security assessment','security audit','soc','siem','endpoint security','edr','xdr','firewall','network security','identity and access management','iam','zero trust','privileged access','mfa','multi-factor authentication','data protection','privacy','digital forensics','incident response','iso 27001','pci dss','dlp','managed detection','managed security','cloud security','access control','biometric','cctv','surveillance','smart gate','truck parking','parking management','stock management system','real time stock management','fleet management','vehicle tracking','pos system','point of sale','electronic records','document management','digital registration','telemetry','iot','radio communication','pabx','public address system','generator monitoring','ups battery'],
   'IT Infrastructure': ['server','data centre','data center','network','router','switch','wireless','wi-fi','wifi','structured cabling','lan','wan','cloud','backup','disaster recovery','business continuity','ups','virtualization','virtualisation','storage'],
   'ICT Hardware': ['ict equipment','ict devices','computer','computers','desktop','laptop','tablet','printer','scanner','server equipment','storage device','computer accessories','communication gadgets','hardware'],
   'IT Support': ['ict support','it support','technical support','helpdesk','help desk','managed services','maintenance','computer maintenance','software maintenance','hardware maintenance','system administration','repair and maintenance','it consulting'],
@@ -45,6 +45,7 @@ export type Opportunity = {
   title?: string; organisation?: string; reference?: string; deadline?: string; description?: string;
   noticeType?: string; url?: string; sourceId: string; source: string; sourceUrl: string;
   matchedTerms: string[]; matchedSections?: string[]; categories?: CapabilityCategory[];
+  details?: { publishedAt?: string; procurementMethod?: string; documents?: Array<{ title: string; url: string }> };
   relevanceScore?: number; relevanceLevel?: RelevanceLevel; fitLevel?: FitLevel;
   classificationReason?: string; classifierVersion?: string; rawText?: string; contentHash?: string; externalId?: string;
 };
@@ -52,7 +53,15 @@ export type Opportunity = {
 export type OpportunitySourceResult = {
   sourceId: string; source: string; sourceUrl: string;
   status: 'ok' | 'authentication_required' | 'error';
-  accessMethod: 'public-page' | 'public-ocds-api'; notices: Opportunity[]; message: string;
+  accessMethod: 'public-page' | 'public-ocds-api';
+  notices: Opportunity[];
+  fetchedCount: number;
+  parsedCount: number;
+  relevantCount: number;
+  failedCount: number;
+  durationMs: number;
+  checkedAt: string;
+  message: string;
 };
 
 export type OpportunityUpdate = Opportunity & {
@@ -165,77 +174,196 @@ async function fetchJson(url: string, init: RequestInit = {}) {
   } finally { clearTimeout(timer); }
 }
 
-async function scrapePage(url: string) {
-  const scraped = await ai.scrape({ url });
-  return text(scraped.text).slice(0, 50000);
+async function fetchText(url: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'text/html,application/xhtml+xml' },
+    });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    return await response.text();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-async function extractTender(content: string, source: typeof OPPORTUNITY_SOURCES[number], fallbackUrl = '') {
-  const extracted = await ai.extract({
-    content,
-    prompt: 'Extract one procurement/tender notice from this source. Preserve facts exactly as published and do not invent missing values. Capture title, organisation, reference number, publication date, submission deadline, notice type, description, scope, requirements, procurement method, source URL and document links. A technology opportunity may have a title without ICT or IT. Return empty strings for unavailable values.',
-    schema: {
-      type: 'object', properties: {
-        title: { type: 'string' }, organisation: { type: 'string' }, reference: { type: 'string' },
-        publishedAt: { type: 'string' }, deadline: { type: 'string' }, noticeType: { type: 'string' },
-        description: { type: 'string' }, scope: { type: 'string' }, requirements: { type: 'string' },
-        procurementMethod: { type: 'string' }, url: { type: 'string' },
-        documents: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, url: { type: 'string' } }, required: ['title', 'url'] } },
-      }, required: ['title','organisation','reference','publishedAt','deadline','noticeType','description','scope','requirements','procurementMethod','url','documents'],
-    },
-    maxTokens: 5000, thinkingMode: 'FAST',
-  });
-  const data = (extracted.data || {}) as Record<string, unknown>;
-  return { candidate: data, source, fallbackUrl, publishedAt: text(data.publishedAt), documents: Array.isArray(data.documents) ? data.documents : [] };
+function decodeHtml(value: string) {
+  return value
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/(p|div|li|td|th|tr|h[1-6])>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#8217;/gi, "'")
+    .replace(/&#8211;/gi, '-')
+    .replace(/&#8212;/gi, '—')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function absoluteUrl(value: string, base: string) {
+  try { return new URL(value, base).toString(); } catch { return ''; }
+}
+
+function extractDate(value: string) {
+  const normalized = value.replace(/(\d{1,2})(st|nd|rd|th)/gi, '$1');
+  const patterns = [
+    /\b\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?)?\b/,
+    /\b\d{1,2}[\/-]\d{1,2}[\/-]\d{4}\b/,
+    /\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}\b/i,
+    /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) continue;
+    const parsed = new Date(match[0]).getTime();
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  return '';
+}
+
+function extractDeadline(value: string) {
+  const context = value.match(/(?:deadline|closing\s+(?:date|time)?|submission\s+(?:deadline|date|time)|bid\s+closing|tender\s+closing|proposal\s+due|due\s+date)[^.;]{0,220}/i)?.[0] || value;
+  return extractDate(context);
+}
+
+function extractReference(value: string) {
+  const match = value.match(/(?:procurement\s+reference(?:\s+number)?|reference\s*(?:number|no\.?)|procurement\s+number|tender\s*(?:no\.?|number))\s*[:#-]?\s*([A-Z0-9][A-Z0-9/_ .-]{3,100})/i);
+  return match ? match[1].replace(/\s+/g, ' ').trim().replace(/[.,;:]+$/, '') : '';
+}
+
+function extractOrganisation(value: string) {
+  const patterns = [
+    /(?:employer|procuring\s+entity|contracting\s+authority|procurement\s+entity|purchasing\s+entity|procuring\s+agency)\s*[:\-]\s*([^.;\n]{3,180})/i,
+    /(?:the\s+)?(?:Malawi\s+Revenue\s+Authority|National\s+Food\s+Reserve\s+Agency|University\s+of\s+Malawi|SADC\s+Secretariat|Ministry\s+of\s+[A-Z][A-Za-z &'’-]{2,100}|Roads\s+Authority|Electricity\s+Supply\s+Corporation\s+of\s+Malawi(?:\s+Limited)?)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match) return text(match[1] || match[0]);
+  }
+  return '';
+}
+
+function extractRows(html: string) {
+  const rows: Array<{ cells: string[]; links: string[] }> = [];
+  for (const row of html.match(/<tr[\s\S]*?<\/tr>/gi) || []) {
+    const cells = (row.match(/<(?:td|th)[^>]*>[\s\S]*?<\/(?:td|th)>/gi) || []).map(decodeHtml).filter(Boolean);
+    if (cells.length < 2) continue;
+    const links = Array.from(row.matchAll(/href\s*=\s*["']([^"']+)["']/gi)).map(match => match[1]);
+    rows.push({ cells, links });
+  }
+  return rows;
+}
+
+function linkCandidates(html: string, baseUrl: string) {
+  const candidates: Array<{ title: string; url: string }> = [];
+  const seen = new Set<string>();
+  for (const match of html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const url = absoluteUrl(match[1], baseUrl);
+    const title = decodeHtml(match[2]);
+    if (!url || !title || title.length < 12 || title.length > 320 || seen.has(url)) continue;
+    if (/^(home|login|contact|about|read more|details|download|subscribe|next|previous)$/i.test(title)) continue;
+    seen.add(url);
+    candidates.push({ title, url });
+  }
+  return candidates;
+}
+
+function publicCandidates(html: string, source: typeof OPPORTUNITY_SOURCES[number]) {
+  const candidates: Array<Record<string, unknown>> = [];
+  for (const row of extractRows(html)) {
+    const joined = row.cells.join(' ');
+    const headerOnly = row.cells.every(cell => /^(title|institution|reference(?: no\.?)?|publish(?:ed)? date|closing date|attachment)$/i.test(cell));
+    if (headerOnly) continue;
+    candidates.push({
+      title: row.cells[0],
+      organisation: row.cells[1],
+      reference: row.cells[2],
+      publishedAt: extractDate(row.cells[3] || ''),
+      deadline: extractDeadline(joined),
+      description: row.cells.slice(0, 6).join(' — '),
+      noticeType: 'Procurement notice',
+      url: absoluteUrl(row.links[0] || '', source.url) || source.url,
+    });
+  }
+  if (candidates.length) return candidates;
+  return linkCandidates(html, source.url).map(link => ({
+    title: link.title,
+    organisation: '',
+    reference: extractReference(link.title),
+    publishedAt: extractDate(link.title),
+    deadline: extractDeadline(link.title),
+    description: link.title,
+    noticeType: 'Procurement notice',
+    url: link.url,
+  }));
+}
+
+function sourceResult(source: typeof OPPORTUNITY_SOURCES[number], started: number, rawCount: number, parsedCount: number, notices: Opportunity[], failedCount: number, message: string, status: 'ok' | 'error' = 'ok', accessMethod: 'public-page' | 'public-ocds-api' = 'public-page'): OpportunitySourceResult {
+  return {
+    sourceId: source.id, source: source.name, sourceUrl: source.url, status, accessMethod, notices,
+    fetchedCount: rawCount, parsedCount, relevantCount: notices.length, failedCount,
+    durationMs: Date.now() - started, checkedAt: new Date().toISOString(), message,
+  };
 }
 
 async function scanCareersMalawi(): Promise<OpportunitySourceResult> {
   const source = OPPORTUNITY_SOURCES.find(item => item.id === 'careersmw')!;
+  const started = Date.now();
   try {
-    const indexContent = await scrapePage(source.url);
-    if (indexContent.length < 120) return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'error', accessMethod: 'public-page', notices: [], message: 'Careers Malawi did not expose enough listing content for discovery.' };
-
-    const extractedIndex = await ai.extract({
-      content: indexContent,
-      prompt: 'Extract every individual tender/article link visible in the Careers Malawi tender listing. Do not filter to ICT. Do not invent URLs. Keep titles as published.',
-      schema: {
-        type: 'object', properties: { notices: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, url: { type: 'string' } }, required: ['title','url'] } } },
-        required: ['notices'],
-      }, maxTokens: 7000, thinkingMode: 'FAST',
-    });
-    const extractedItems = Array.isArray((extractedIndex.data as { notices?: unknown[] } | undefined)?.notices)
-      ? (extractedIndex.data as { notices: unknown[] }).notices : [];
-    const fallbackLinks = extractMarkdownLinks(indexContent).filter(link => /careersmw\.com\/tenders-and-non-consultancy-services\//i.test(link.url));
-    const candidates = new Map<string, { title: string; url: string }>();
-    for (const item of extractedItems) {
-      const record = item as Record<string, unknown>; const title = text(record.title); const url = text(record.url);
-      if (title && /^https?:\/\//i.test(url) && /careersmw\.com/i.test(url)) candidates.set(url, { title, url });
-    }
-    for (const link of fallbackLinks) candidates.set(link.url, link);
-    const links = Array.from(candidates.values()).slice(0, 50);
-    const notices: Opportunity[] = []; let extractionFailures = 0;
-
+    const html = await fetchText(source.url);
+    const links = linkCandidates(html, source.url)
+      .filter(link => link.url.startsWith('https://careersmw.com/'))
+      .filter(link => !/\/page\/\d+\/?$|\/category\/|\/tag\//i.test(link.url))
+      .slice(0, 80);
+    let failed = 0;
+    const notices: Opportunity[] = [];
     for (const link of links) {
       try {
-        const detailContent = await scrapePage(link.url);
-        if (detailContent.length < 100) continue;
-        const detail = await extractTender(detailContent, source, link.url);
-        const candidate = detail.candidate as Record<string, unknown>;
-        if (!candidate.title) candidate.title = link.title;
-        if (!candidate.url) candidate.url = link.url;
-        const notice = normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference), detailContent);
-        if (notice) notices.push(notice);
-      } catch { extractionFailures += 1; }
+        const detailHtml = await fetchText(link.url);
+        const articleText = decodeHtml(detailHtml);
+        const title = (detailHtml.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1] || detailHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || link.title);
+        const candidate = {
+          title: decodeHtml(title),
+          organisation: extractOrganisation(articleText),
+          reference: extractReference(articleText),
+          deadline: extractDeadline(articleText),
+          publishedAt: extractDate(articleText.match(/(?:publication|published|date of publication|date issued|issue date)[^.;]{0,100}/i)?.[0] || ''),
+          description: articleText.slice(0, 12000),
+          noticeType: /request for (?:proposal|quotation|expression)|consultancy/i.test(articleText) ? 'Tender / consultancy' : 'Tender / bid',
+          url: link.url,
+        };
+        const notice = normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference), articleText);
+        if (notice) {
+          notice.details = { publishedAt: dateString(candidate.publishedAt), procurementMethod: /national competitive bidding|ncb/i.test(articleText) ? 'National Competitive Bidding' : '' };
+          notices.push(notice);
+        }
+      } catch { failed += 1; }
     }
     const unique = new Map<string, Opportunity>();
     for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
-    return {
-      sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'ok', accessMethod: 'public-page',
-      notices: Array.from(unique.values()).slice(0, 80),
-      message: 'Discovered ' + links.length + ' Careers Malawi notices; ' + unique.size + ' matched the technology classifier' + (extractionFailures ? '; ' + extractionFailures + ' detail pages could not be extracted' : '') + '.',
-    };
+    return sourceResult(source, started, links.length, links.length - failed, Array.from(unique.values()).slice(0, 80), failed, 'Parsed ' + links.length + ' Careers Malawi detail pages deterministically; ' + unique.size + ' matched the technology classifier.');
   } catch (error) {
-    return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'error', accessMethod: 'public-page', notices: [], message: 'Careers Malawi scan failed: ' + (error instanceof Error ? error.message : 'unknown source error') };
+    return sourceResult(source, started, 0, 0, [], 1, 'Careers Malawi could not be scanned: ' + (error instanceof Error ? error.message : 'unknown source error'), 'error');
+  }
+}
+
+async function scanPublicPage(source: typeof OPPORTUNITY_SOURCES[number]): Promise<OpportunitySourceResult> {
+  const started = Date.now();
+  try {
+    const html = await fetchText(source.url);
+    if (html.length < 120) return sourceResult(source, started, 0, 0, [], 1, 'The public page did not expose enough procurement content for extraction.', 'error');
+    const raw = publicCandidates(html, source);
+    const notices = raw.map(item => normalizeCandidate(item, source.id, source.name, source.url, text(item.reference), text(item.description))).filter((item): item is Opportunity => Boolean(item));
+    const unique = new Map<string, Opportunity>();
+    for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
+    return sourceResult(source, started, raw.length, raw.length, Array.from(unique.values()).slice(0, 100), 0, 'Parsed ' + raw.length + ' public procurement records; ' + unique.size + ' matched the technology classifier.');
+  } catch (error) {
+    return sourceResult(source, started, 0, 0, [], 1, 'The public source could not be scanned: ' + (error instanceof Error ? error.message : 'unknown source error'), 'error');
   }
 }
 
@@ -282,9 +410,9 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
     }));
     const notices = details.flatMap(payload => extractOcdsCandidates(payload).map(candidate => normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference))).filter((item): item is Opportunity => Boolean(item)));
     const unique = new Map<string, Opportunity>(); for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
-    return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'ok', accessMethod: 'public-ocds-api', notices: Array.from(unique.values()).slice(0, 80), message: 'MANEPS OCDS API returned ' + items.length + ' records; ' + unique.size + ' matched the technology opportunity classifier.' };
+    return sourceResult(source, Date.now() - 1, items.length, items.length, Array.from(unique.values()).slice(0, 100), 0, 'MANePS OCDS API returned ' + items.length + ' records; ' + unique.size + ' matched the technology classifier.', 'ok', 'public-ocds-api');
   } catch {
-    return { sourceId: source.id, source: source.name, sourceUrl: source.url, status: 'error', accessMethod: 'public-ocds-api', notices: [], message: 'The MANEPS OCDS API could not be reached. BidWatch did not use a MANEPS login or browser session.' };
+    return sourceResult(source, Date.now() - 1, 0, 0, [], 1, 'MANePS public OCDS endpoint could not be reached. BidWatch did not use a supplier login or browser session.', 'error', 'public-ocds-api');
   }
 }
 
@@ -313,9 +441,11 @@ async function scanPublicPage(source: typeof OPPORTUNITY_SOURCES[number]): Promi
 
 export async function discoverPlatformOpportunities() {
   const results: OpportunitySourceResult[] = [];
-  results.push(await scanCareersMalawi());
-  results.push(await scanManeps());
-  for (const source of OPPORTUNITY_SOURCES.filter(item => item.id !== 'maneps' && item.id !== 'careersmw')) results.push(await scanPublicPage(source));
+  for (const source of OPPORTUNITY_SOURCES) {
+    if (source.id === 'maneps') results.push(await scanManeps());
+    else if (source.id === 'careersmw') results.push(await scanCareersMalawi());
+    else results.push(await scanPublicPage(source));
+  }
   return results;
 }
 
