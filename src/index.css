@@ -1159,6 +1159,38 @@ td small {
   }
 }
 @media (max-width: 480px) {
+  .dashboard-list-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px 9px;
+  }
+  .dashboard-list-head span:last-child {
+    width: 100%;
+    text-align: left;
+    line-height: 1.4;
+  }
+  .dashboard-bid-card {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 14px;
+  }
+  .dashboard-bid-meta {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "date status"
+      "urgency action";
+    align-items: center;
+    justify-items: start;
+    gap: 6px 10px;
+    padding-top: 2px;
+  }
+  .dashboard-bid-meta strong { grid-area: date; }
+  .dashboard-bid-meta .urgency { grid-area: urgency; }
+  .dashboard-bid-meta .status { grid-area: status; justify-self: end; }
+  .dashboard-bid-meta .dashboard-open-action { grid-area: action; justify-self: end; }
+
   .main { padding: 16px 10px 28px; }
   .page-head { gap: 12px; margin-bottom: 16px; }
   .page-head > div { min-width: 0; }
