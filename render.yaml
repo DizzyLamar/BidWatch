@@ -3,7 +3,7 @@ services:
     name: bidwatch
     runtime: node
     plan: free
-    branch: migration/render-supabase
+    branch: main
     autoDeploy: true
     buildCommand: npm install && npm run build
     startCommand: npm start
