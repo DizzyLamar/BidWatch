@@ -264,11 +264,25 @@ export async function reminderHandler(_event: unknown) {
   return { statusCode: 200 };
 }
 
+export async function opportunityScanHandler() {
+  const sources = await discoverPlatformOpportunities();
+  await persistOpportunityUpdates(sources);
+  const persisted = await listOpportunityUpdates(120);
+  const missingDeadlines = persisted.filter(item => !item.deadline && item.state !== 'dismissed').slice(0, 30);
+  for (const item of missingDeadlines) await verifyOpportunity(item.id);
+  return { scannedAt: now(), sources };
+}
+
 export const handler = router({
   'POST /api/internal/reminders': [async ctx => {
     const secret = String(ctx.req.headers['x-cron-secret'] || '');
     if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) return error('Unauthorized.', 401);
     return json(await reminderHandler(null));
+  }],
+  'POST /api/internal/opportunity-scan': [async ctx => {
+    const secret = String(ctx.req.headers['x-cron-secret'] || '');
+    if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) return error('Unauthorized.', 401);
+    return json(await opportunityScanHandler());
   }],
   'GET /api/me': [requireAuth(), async ctx => { const u = await currentUser(ctx); if (!u) return error('Your Google account is not provisioned for BidWatch.', 403); if (!u.active || u.status === 'Suspended') return error('Your BidWatch access is suspended.', 403); return json({ user: { ...u, role: u.role?.name || 'Member', onboardingCompleted: u.onboardingCompleted === true } }); }], 'PUT /api/me/profile': [requireAuth(), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('A display name is required.', 400); const next = { ...u, name, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ user: next }); }],
   'PUT /api/me/onboarding': [requireAuth(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
@@ -276,7 +290,7 @@ export const handler = router({
   'GET /api/opportunities/sources': [requireAuth(), requirePermission('bids.view'), async () => json({ sources: DISCOVERY_SOURCES })],
   'GET /api/opportunities/updates': [requireAuth(), requirePermission('bids.view'), async () => json({ updates: await listOpportunityUpdates(60) })],
   'GET /api/opportunities/:id': [requireAuth(), requirePermission('bids.view'), async ctx => { const opportunity = await verifyOpportunity(ctx.params.id); if (!opportunity) return error('Opportunity not found.', 404); return json({ opportunity }); }],
-  'POST /api/opportunities/scan': [requireAuth(), requirePermission('bids.view'), async ctx => { if (!rateLimit(`scan:${ctx.user!.userId}`, RATE_LIMITS.scan)) return error('Source scanning is temporarily rate-limited. Try again in a few minutes.', 429); const sources = await discoverPlatformOpportunities(); await persistOpportunityUpdates(sources); const persisted = await listOpportunityUpdates(120); const missingDeadlines = persisted.filter(item => !item.deadline && item.state !== 'dismissed').slice(0, 30); for (const item of missingDeadlines) await verifyOpportunity(item.id); return json({ scannedAt: now(), sources }); }],
+  'POST /api/opportunities/scan': [requireAuth(), requirePermission('bids.view'), async ctx => { if (!rateLimit(`scan:${ctx.user!.userId}`, RATE_LIMITS.scan)) return error('Source scanning is temporarily rate-limited. Try again in a few minutes.', 429); return json(await opportunityScanHandler()); }],
   'POST /api/opportunities/import': [requireAuth(), requirePermission('bids.create'), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const title = text(b.title, 'title'); const organisation = text(b.organisation, 'organisation', 'Unknown organisation'); const deadline = text(b.deadline, 'deadline'); const url = text(b.url, 'url'); const category = text(b.category, 'category', 'Other'); const reference = text(b.reference, 'reference'); if (!title || !deadline || !validDeadline(deadline)) return error('A valid title and deadline are required to import an opportunity.', 400); if (!validUrl(url)) return error('Only http and https source URLs are allowed.', 400); const cats = await listAll<{ name: string; active: boolean }>('categories'); if (!cats.some(c => c.active && c.name === category)) return error('Category is not active.', 400); const existing = await listAll<Tender>('tenders'); const duplicate = existing.find(t => (reference && t.reference && t.reference.toLowerCase() === reference.toLowerCase()) || (url && t.url && t.url === url)); if (duplicate) return json({ duplicate: true, tender: duplicate }); const [id] = await db.add('tenders', [{ title, organisation, reference, description: text(b.description, 'description'), deadline, source: text(b.source, 'source'), url, category, status: 'New', assigneeId: '', submittedBy: u.id, submittedAt: now(), notes: text(b.notes, 'notes'), revision: 1 }]); if (!id) return error('Could not import opportunity.', 500); const opportunityUpdateId = text(b.opportunityUpdateId, 'reference'); if (opportunityUpdateId) { const update = await getById<Record<string, unknown>>('opportunity_updates', opportunityUpdateId); if (update) await db.update('opportunity_updates', [{ id: update.id, record: { ...update, state: 'imported', importedTenderId: id, lastSeenAt: now() } }]); } await tenderLog(id, ctx, 'imported an opportunity', text(b.source, 'source')); return json({ duplicate: false, tender: await getById<Tender>('tenders', id) }, 201); }],
   'GET /api/kpis': [requireAuth(), requirePermission('bids.view'), async ctx => { const u = await actor(ctx); return json({ kpis: await buildKpis(ctx, u) }); }],
   'GET /api/tenders': [requireAuth(), requirePermission('bids.view'), async () => json({ tenders: (await listAll<Tender>('tenders')).map(t => ({ ...t, revision: Number(t.revision || 1) })) })],
