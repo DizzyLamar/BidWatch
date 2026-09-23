@@ -1,0 +1,25 @@
+name: BidWatch opportunity scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+
+concurrency:
+  group: bidwatch-opportunity-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan procurement sources
+        env:
+          BIDWATCH_URL: ${{ secrets.BIDWATCH_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          test -n "$BIDWATCH_URL"
+          test -n "$CRON_SECRET"
+          curl --fail-with-body --silent --show-error \
+            -X POST "$BIDWATCH_URL/api/internal/opportunity-scan" \
+            -H "X-Cron-Secret: $CRON_SECRET"
