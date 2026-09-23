@@ -58,7 +58,7 @@
       "Verify MANEPS is reported through its public OCDS/API discovery path without asking for a MANEPS password",
       "Filter opportunities to cybersecurity and sort them by priority and deadline urgency",
       "Open a returned opportunity and review its source, organisation, reference, deadline, verification status, participation details and available documents",
-      "Verify expired opportunities are absent from the default current list and use Needs verification to inspect records without a published deadline",
+      "Verify expired opportunities are absent from the default current list and use No deadline published to inspect records without a published deadline",
       "Change the rows-per-page control and move between Page 1 of N and later pages",
       "Review an opportunity with a repeated reference and verify it identifies the other source instead of presenting the records as unrelated",
       "If a deadline is missing, choose Verify source details and review the result",
