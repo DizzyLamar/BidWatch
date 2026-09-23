@@ -454,12 +454,7 @@ export async function persistOpportunityUpdates(results: OpportunitySourceResult
 
 export async function listOpportunityUpdates(limit = 30) {
   const result = await db.list<OpportunityUpdate>('opportunity_updates', { limit: 2000 });
-  const current = result.items.filter(item => {
-    if (item.state === 'dismissed') return false;
-    if (!item.deadline) return true;
-    const time = new Date(item.deadline).getTime();
-    return Number.isFinite(time) && time >= Date.now();
-  });
+  const current = result.items.filter(item => item.state !== 'dismissed');
   const byReference = new Map<string, Set<string>>();
   for (const item of current) {
     const reference = text(item.reference).toLowerCase(); if (!reference) continue;
