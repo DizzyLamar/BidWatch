@@ -49,7 +49,7 @@
     "steps": [
       "Open Find Opportunities",
       "Choose Scan sources",
-      "Review the PPPC and PPDA source statuses and any relevant ICT or cybersecurity opportunities",
+      "Review the Careers Malawi, PPPC and PPDA source statuses and any relevant ICT or cybersecurity opportunities",\n      "On Careers Malawi results, verify the MRA ICT Devices opportunity is discoverable when published and that its classification shows ICT Hardware rather than requiring the title to contain a generic ICT filter",\n      "Review a less-obvious technology opportunity such as UPS, biometric access control or a stock management system and verify BidWatch explains the capability-area match",
       "Verify MANEPS is reported through its public OCDS/API discovery path without asking for a MANEPS password",
       "Filter opportunities to cybersecurity and sort them by priority and deadline urgency",
       "Open a returned opportunity and review its source, organisation, reference, deadline, verification status, participation details and available documents",
