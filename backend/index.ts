@@ -181,7 +181,7 @@ async function currentUser(ctx: RouterContext) {
       u = { id: id || '', userId: ctx.user!.userId, email, name: ctx.user!.name || 'Super Admin', roleId: superRole.id, active: true, status: 'Active', createdAt: now(), updatedAt: now(), lastSeenAt: now() };
     } catch {
       const refreshed = await listAll<User>('users');
-      u = refreshed.find(x => x.userId === ctx.user!.userId) || refreshed.find(x => x.email.toLowerCase() === email) || null;
+      u = refreshed.find(x => x.userId === ctx.user!.userId) || refreshed.find(x => x.email.toLowerCase() === email);
     }
   }
   if (!u) return null;
