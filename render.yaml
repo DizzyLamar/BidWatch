@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     branch: main
-    autoDeployTrigger: checksPass
+    autoDeployTrigger: off
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /healthz
