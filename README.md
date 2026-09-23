@@ -47,11 +47,11 @@ The authenticated BidWatch user receives a role. The role determines the permiss
 
 **Application**
 
-The React frontend calls authenticated AppDeploy API routes. The backend validates authorization and input before changing application state. Database records and managed object storage are accessed through the backend.
+The React frontend calls authenticated API routes. The backend validates authorization and input before changing application state. Database records and managed object storage are accessed through the backend.
 
 Frontend: React, Vite, TypeScript and Tailwind CSS.
 
-Backend: AppDeploy router, database and managed storage.
+Backend: Express router, Supabase database and Supabase private storage.
 
 Object storage is isolated behind `backend/storage.ts` so business logic does not depend directly on one storage implementation.
 
@@ -193,9 +193,9 @@ GitHub Actions runs on pull requests and pushes to `main`.
 
 The pipeline installs dependencies, typechecks the project, runs `npm test` and builds the production frontend.
 
-`npm test` runs `scripts/verify-repo.mjs`. The repository verification checks the AppDeploy test suite, security-sensitive backend routes, bid-history support, managed storage deletion, unsafe HTML patterns, native browser confirmations and required production error styling.
+`npm test` runs `scripts/verify-repo.mjs`. The repository verification checks the deployed QA suite, security-sensitive backend routes, bid-history support, managed storage deletion, unsafe HTML patterns, native browser confirmations and required production error styling.
 
-### AppDeploy QA
+### Deployed QA
 
 `tests/tests.json` defines user-visible workflows for deployed QA. Current coverage includes first-login onboarding, labelled filters at mobile width, destructive deletion and history, concurrent bid edits, privileged workflow boundaries and production error handling.
 
@@ -233,7 +233,7 @@ A feature is complete only when:
 - `npm run typecheck` passes.
 - `npm test` passes.
 - `npm run build` passes.
-- AppDeploy reports a ready deployment with no frontend or backend runtime errors.
+- Render reports a healthy deployment with no frontend or backend runtime errors.
 - GitHub contains the same application source used by the deployment.
 
 ## Git workflow
@@ -250,19 +250,15 @@ Recommended commit prefixes:
 - `chore:` tooling, CI or dependencies.
 - `refactor:` behavior-preserving architecture changes.
 
-GitHub is the source-control record. The AppDeploy source must be synchronized before a change is considered complete.
+GitHub is the source-control record. The Render deployment must be sourced from the GitHub commit that passed CI.
 
 ## Continuous integration and deployment
 
 `.github/workflows/ci.yml` runs automatically for pull requests and pushes to `main`.
 
-`.github/workflows/deploy.yml` runs after pushes to `main` and can also be triggered manually.
+`Render deploys the connected `main` branch automatically. GitHub Actions is responsible for CI verification; Render is responsible for building and running the production web service.
 
-The deployment workflow repeats the critical verification steps and then calls AppDeploy through `scripts/deploy-appdeploy.mjs`.
-
-The workflow requires the `APPDEPLOY_API_KEY` GitHub Actions secret. The key must never be committed to the repository or included in application source.
-
-The deployment script detects changed application files, sends the relevant application changes to AppDeploy, polls deployment status and fails when deployment fails or runtime errors are reported. Production deployments use a GitHub Actions concurrency group to prevent overlapping deployments.
+The Render service uses `npm install && npm run build`, starts with `npm start`, and exposes `/healthz` for readiness checks. Production secrets are configured in Render and are never committed to the repository.
 
 ## Local development
 
@@ -281,7 +277,8 @@ npm run build
 
 ## Production
 
-Live application:
+Live application
+:
 
 `https://bidwatch-q2u0th.v2.appdeploy.ai/`
 
