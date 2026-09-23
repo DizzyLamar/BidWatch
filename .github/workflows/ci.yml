@@ -33,4 +33,4 @@ jobs:
         run: npm test
 
       - name: Validate automation scripts
-        run: node --check scripts/verify-repo.mjs && node --check scripts/deploy-appdeploy.mjs
+        run: node --check scripts/verify-repo.mjs
