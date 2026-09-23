@@ -4,4 +4,3 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://bidwatch-q2u0th.v2.appdeploy.ai/sitemap.xml
