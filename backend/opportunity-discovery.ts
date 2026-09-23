@@ -115,6 +115,11 @@ function extractArticleText(html: string) {
   );
 }
 
+function extractDeadline(value: string) {
+  const context = value.match(/(?:deadline|closing\s+date|closing|submission\s+deadline|proposal\s+due\s+date|bid\s+submission\s+date|expiry\s+date|due\s+date)[^\n]{0,220}/i)?.[0] || value;
+  return extractDate(context);
+}
+
 function extractReference(value: string) {
   const match = value.match(/(?:procurement\s+reference(?:\s+number)?|reference\s*(?:number|no\.?))\s*[:#-]?\s*([A-Z0-9][A-Z0-9/_ .-]{3,100})/i);
   return match ? match[1].replace(/\s+/g, ' ').trim().replace(/[.,;:]+$/, '') : '';
@@ -371,7 +376,7 @@ async function scanCareersMw(): Promise<OpportunitySourceResult> {
       if (!item) return [];
       const articleText = extractArticleText(item.html);
       const title = extractArticleTitle(item.html) || item.link.title;
-      const deadline = extractDate(articleText);
+      const deadline = extractDeadline(articleText);
       const candidate = {
         title,
         organisation: extractOrganisation(articleText),
