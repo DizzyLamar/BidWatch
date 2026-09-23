@@ -91,7 +91,7 @@ async function checked<T>(result: { data: T | null; error: any }) {
 export const db = {
   async list<T>(table: string, options: { limit?: number } = {}) {
     const result = await supabase.from('app_records').select('id,table_name,record')
-      .eq('table_name', table).order('created_at', { ascending: true })
+      .eq('table_name', table).order('created_at', { ascending: false })
       .limit(Math.min(options.limit ?? 500, 5000));
     const rows = await checked<RecordRow[]>(result);
     return { items: rows.map(row => ({ ...(row.record as T), id: row.id })) };
