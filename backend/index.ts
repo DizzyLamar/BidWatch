@@ -303,7 +303,7 @@ async function buildKpis(ctx: RouterContext, u: Awaited<ReturnType<typeof curren
   return result;
 }
 
-export async function reminderHandler(_event: unknown) {
+export async function procurementDiscoveryHandler(_event: unknown) {\n  const sources = await discoverPlatformOpportunities();\n  await persistOpportunityUpdates(sources);\n  return { statusCode: 200, scannedAt: now(), sources };\n}\n\nexport async function reminderHandler(_event: unknown) {
   const tenders = await listAll<Tender>('tenders'); const users = await listAll<User>('users'); const notes = await listAll<{ tenderId: string; userId: string; kind: string; createdAt: string }>('notifications');
   for (const t of tenders) { if (['Applied', 'Declined'].includes(t.status)) continue; const diff = new Date(t.deadline).getTime() - Date.now(); const days = Math.ceil(diff / 86400000); if (diff >= 0 && ![14, 7, 3, 1, 0].includes(days)) continue; const kind = `deadline-${days}`; const targets = t.assigneeId ? users.filter(u => u.id === t.assigneeId && u.status !== 'Suspended' && u.active) : users.filter(u => u.status !== 'Suspended' && u.active); for (const u of targets) if (!notes.some(n => n.tenderId === t.id && n.userId === u.userId && n.kind === kind && new Date(n.createdAt).toDateString() === new Date().toDateString())) await db.add('notifications', [{ userId: u.userId, tenderId: t.id, kind, title: diff < 0 ? 'Bid overdue' : days === 0 ? 'Bid due today' : `Bid due in ${days} days`, body: `${t.title} for ${t.organisation} is ${diff < 0 ? 'past its deadline' : 'approaching its deadline'}.`, read: false, createdAt: now() }]); }
   return { statusCode: 200 };
