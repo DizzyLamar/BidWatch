@@ -29,19 +29,21 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Production build
+        run: npm run build
+
       - name: Repository verification
         run: npm test
 
       - name: Validate automation scripts
         run: node --check scripts/verify-repo.mjs
 
-
   deploy:
     name: Deploy to Render
     needs: verify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Trigger Render deploy
         env:
@@ -49,3 +51,18 @@ jobs:
         run: |
           test -n "$RENDER_DEPLOY_HOOK_URL"
           curl --fail --silent --show-error --request POST "$RENDER_DEPLOY_HOOK_URL"
+
+      - name: Wait for Render health check
+        run: |
+          set -e
+          for i in {1..48}; do
+            status=$(curl --silent --show-error --output /tmp/health.json --write-out "%{http_code}" --max-time 10 https://bidwatch.onrender.com/healthz || true)
+            if [ "$status" = "200" ]; then
+              echo "Render is healthy: $(cat /tmp/health.json)"
+              exit 0
+            fi
+            echo "Render not ready yet (HTTP $status), attempt $i/48"
+            sleep 10
+          done
+          echo "Render did not become healthy within 8 minutes."
+          exit 1
