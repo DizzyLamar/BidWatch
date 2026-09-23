@@ -1,4 +1,4 @@
-const DEFAULT_SITE_URL = 'https://bidwatch-q2u0th.v2.appdeploy.ai';
+const DEFAULT_SITE_URL = 'https://bidwatch.onrender.com';
 const OG_IMAGE_PATH = '/og-bidwatch.svg';
 
 const pageMeta: Record<string, { title: string; description: string }> = {
