@@ -50,11 +50,15 @@ jobs:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           test -n "$RENDER_DEPLOY_HOOK_URL"
-          curl --fail --silent --show-error --request POST "$RENDER_DEPLOY_HOOK_URL"
+          curl --fail --silent --show-error --request POST --output /tmp/render-deploy.json "$RENDER_DEPLOY_HOOK_URL"
+          echo "Render deploy hook response:"
+          cat /tmp/render-deploy.json
 
       - name: Wait for Render health check
         run: |
           set -e
+          echo "Resolving bidwatch.onrender.com:"
+          getent hosts bidwatch.onrender.com || true
           for i in {1..48}; do
             status=$(curl --silent --show-error --output /tmp/health.json --write-out "%{http_code}" --max-time 10 https://bidwatch.onrender.com/healthz || true)
             if [ "$status" = "200" ]; then
@@ -65,4 +69,6 @@ jobs:
             sleep 10
           done
           echo "Render did not become healthy within 8 minutes."
+          echo "Final health response:"
+          cat /tmp/health.json 2>/dev/null || true
           exit 1
