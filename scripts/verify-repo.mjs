@@ -7,7 +7,7 @@ const failures = [];
 
 const tests = JSON.parse(read('tests/tests.json'));
 if (!Array.isArray(tests) || tests.length < 3 || tests.length > 5) failures.push('tests/tests.json must contain 3-5 tests.');
-if (tests.filter(test => test.sanity === true).length !== 1) failures.push('Exactly one AppDeploy QA test must have sanity: true.');
+if (tests.filter(test => test.sanity === true).length !== 1) failures.push('Exactly one sanity QA test must have sanity: true.');
 for (const test of tests) {
   if (!test.name || !test.viewport || !Array.isArray(test.covers) || !test.covers.length || !test.description || !Array.isArray(test.steps) || !test.steps.length || !test.expected) failures.push(`Invalid test definition: ${test.name || '<unnamed>'}`);
 }

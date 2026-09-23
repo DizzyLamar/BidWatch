@@ -97,8 +97,7 @@ function hasSignature(bytes: Uint8Array, ext: string) {
 }
 
 function validateUpload(filename: string, mimeType: string, claimedSize: number, content: string) {
-  const ext = filename.toLowerCase().split('.').pop() || '';
-  if (!filename || !content) return 'File data is required.';
+  const ext = filename.toLowerCase().split('.').pop() || '';  if (!filename || !content) return 'File data is required.';
   if (filename.length > 255 || !SAFE_EXTENSIONS.has(ext)) return 'This file type is not permitted.';
   if (!Number.isFinite(claimedSize) || claimedSize <= 0 || claimedSize > 10 * 1024 * 1024) return 'Files must be between 1 byte and 10 MB in the current upload path.';
   if (content.length > 14 * 1024 * 1024) return 'Encoded file payload is too large.';
@@ -117,7 +116,7 @@ interface User { id: string; userId?: string; email: string; name: string; roleI
 interface Tender { id: string; title: string; organisation: string; reference: string; description: string; deadline: string; source: string; url: string; category: string; status: string; assigneeId: string; submittedBy: string; submittedAt: string; notes: string; revision?: number; submissionReference?: string; appliedBy?: string; appliedAt?: string }
 interface BidHistory { id: string; originalTenderId: string; title: string; organisation: string; reference: string; description: string; deadline: string; source: string; url: string; category: string; status: string; assigneeId: string; submittedBy: string; submittedAt: string; notes: string; submissionReference?: string; appliedBy?: string; appliedAt?: string; deletedBy: string; deletedAt: string; attachmentCount: number }
 
-const OPPORTUNITY_SOURCES_UNUSED = [
+const OPPORTUNITY_SOURCES = [
   { id: 'pppc', name: 'PPPC procurement adverts', url: 'https://www.pppc.mw/procurement/adverts', kind: 'public' },
   { id: 'ppda', name: 'PPDA procurement notices', url: 'https://ppda.mw/tenders', kind: 'public' },
   { id: 'maneps', name: 'MANEPS procurement notices', url: 'https://maneps.mw/procurement-notice', kind: 'portal' },
@@ -135,7 +134,7 @@ const OPPORTUNITY_TERMS = [
   'request for quotation', 'request for proposals', 'tender'
 ];
 
-function opportunityMatch_UNUSED(textValue: string) {
+function opportunityMatch(textValue: string) {
   const haystack = textValue.toLowerCase();
   return OPPORTUNITY_TERMS.filter(term => haystack.includes(term)).slice(0, 12);
 }
@@ -148,8 +147,7 @@ function validUrl(value: string) { if (!value) return true; try { const u = new 
 function validDeadline(value: string) { const d = new Date(value).getTime(); return Number.isFinite(d); }
 function roleHasSensitive(role: Role | null) { return Boolean(role?.permissions.some(p => SENSITIVE_PERMISSIONS.includes(p))); }
 
-async function seed() {
-  let roles = await listAll<Role>('roles');
+async function seed() {  let roles = await listAll<Role>('roles');
   if (!roles.length) {
     const ids = await db.add('roles', [
       { name: 'Super Admin', description: 'Protected platform owner. Manages users, roles and system configuration.', permissions: PERMISSIONS.map(p => p.key), system: true, createdAt: now(), updatedAt: now() },
@@ -176,13 +174,8 @@ async function currentUser(ctx: RouterContext) {
 
   if (!u && email === SUPER_ADMIN_EMAIL) {
     if (!superRole) return null;
-    try {
-      const [id] = await db.add('users', [{ userId: ctx.user!.userId, email, name: ctx.user!.name || 'Super Admin', roleId: superRole.id, active: true, status: 'Active', createdAt: now(), updatedAt: now(), lastSeenAt: now() }]);
-      u = { id: id || '', userId: ctx.user!.userId, email, name: ctx.user!.name || 'Super Admin', roleId: superRole.id, active: true, status: 'Active', createdAt: now(), updatedAt: now(), lastSeenAt: now() };
-    } catch {
-      const refreshed = await listAll<User>('users');
-      u = refreshed.find(x => x.userId === ctx.user!.userId) || refreshed.find(x => x.email.toLowerCase() === email);
-    }
+    const [id] = await db.add('users', [{ userId: ctx.user!.userId, email, name: ctx.user!.name || 'Super Admin', roleId: superRole.id, active: true, status: 'Active', createdAt: now(), updatedAt: now(), lastSeenAt: now() }]);
+    u = { id: id || '', userId: ctx.user!.userId, email, name: ctx.user!.name || 'Super Admin', roleId: superRole.id, active: true, status: 'Active', createdAt: now(), updatedAt: now(), lastSeenAt: now() };
   }
   if (!u) return null;
   if (u.email.toLowerCase() !== email) return null;
@@ -218,7 +211,7 @@ async function storageStats() {
 }
 
 function kpiPermissionForSection(section: string): Permission { return `kpis.view.${section}` as Permission; }
-async function buildKpis(_ctx: RouterContext, u: Awaited<ReturnType<typeof currentUser>>) {
+async function buildKpis(ctx: RouterContext, u: Awaited<ReturnType<typeof currentUser>>) {
   const tenders = await listAll<Tender>('tenders');
   const result: Record<string, unknown> = {};
   const active = tenders.filter(t => !['Applied', 'Declined'].includes(t.status));
@@ -253,9 +246,14 @@ async function buildKpis(_ctx: RouterContext, u: Awaited<ReturnType<typeof curre
   if (u?.permissions.includes(kpiPermissionForSection('access'))) {
     const users = await listAll<User>('users'); const roles = await listAll<Role>('roles');
     result.access = { provisioned: users.filter(x => x.status === 'Provisioned').length, active: users.filter(x => x.status === 'Active' && x.active).length, suspended: users.filter(x => x.status === 'Suspended' || !x.active).length, roles: roles.length };
-  }
-  if (u?.permissions.includes(kpiPermissionForSection('storage'))) result.storage = await storageStats();
+  }  if (u?.permissions.includes(kpiPermissionForSection('storage'))) result.storage = await storageStats();
   return result;
+}
+
+export async function procurementDiscoveryHandler(_event: unknown) {
+  const sources = await discoverPlatformOpportunities();
+  await persistOpportunityUpdates(sources);
+  return { statusCode: 200, scannedAt: now(), sources };
 }
 
 export async function reminderHandler(_event: unknown) {
@@ -264,33 +262,14 @@ export async function reminderHandler(_event: unknown) {
   return { statusCode: 200 };
 }
 
-export async function opportunityScanHandler() {
-  const sources = await discoverPlatformOpportunities();
-  await persistOpportunityUpdates(sources);
-  const persisted = await listOpportunityUpdates(120);
-  const missingDeadlines = persisted.filter(item => !item.deadline && item.state !== 'dismissed').slice(0, 30);
-  for (const item of missingDeadlines) await verifyOpportunity(item.id);
-  return { scannedAt: now(), sources };
-}
-
 export const handler = router({
-  'POST /api/internal/reminders': [async ctx => {
-    const secret = String(ctx.req.headers['x-cron-secret'] || '');
-    if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) return error('Unauthorized.', 401);
-    return json(await reminderHandler(null));
-  }],
-  'POST /api/internal/opportunity-scan': [async ctx => {
-    const secret = String(ctx.req.headers['x-cron-secret'] || '');
-    if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) return error('Unauthorized.', 401);
-    return json(await opportunityScanHandler());
-  }],
   'GET /api/me': [requireAuth(), async ctx => { const u = await currentUser(ctx); if (!u) return error('Your Google account is not provisioned for BidWatch.', 403); if (!u.active || u.status === 'Suspended') return error('Your BidWatch access is suspended.', 403); return json({ user: { ...u, role: u.role?.name || 'Member', onboardingCompleted: u.onboardingCompleted === true } }); }], 'PUT /api/me/profile': [requireAuth(), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('A display name is required.', 400); const next = { ...u, name, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ user: next }); }],
   'PUT /api/me/onboarding': [requireAuth(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
   'GET /api/config': [requireAuth(), requirePermission('bids.view'), async () => { const records = await listAll<{ name: string; active: boolean }>('categories'); return json({ categories: records.filter(x => x.active).map(x => x.name), categoryRecords: records, statuses: STATUSES }); }],
   'GET /api/opportunities/sources': [requireAuth(), requirePermission('bids.view'), async () => json({ sources: DISCOVERY_SOURCES })],
   'GET /api/opportunities/updates': [requireAuth(), requirePermission('bids.view'), async () => json({ updates: await listOpportunityUpdates(60) })],
   'GET /api/opportunities/:id': [requireAuth(), requirePermission('bids.view'), async ctx => { const opportunity = await verifyOpportunity(ctx.params.id); if (!opportunity) return error('Opportunity not found.', 404); return json({ opportunity }); }],
-  'POST /api/opportunities/scan': [requireAuth(), requirePermission('bids.view'), async ctx => { if (!rateLimit(`scan:${ctx.user!.userId}`, RATE_LIMITS.scan)) return error('Source scanning is temporarily rate-limited. Try again in a few minutes.', 429); return json(await opportunityScanHandler()); }],
+  'POST /api/opportunities/scan': [requireAuth(), requirePermission('bids.view'), async ctx => { if (!rateLimit(`scan:${ctx.user!.userId}`, RATE_LIMITS.scan)) return error('Source scanning is temporarily rate-limited. Try again in a few minutes.', 429); const sources = await discoverPlatformOpportunities(); await persistOpportunityUpdates(sources); const persisted = await listOpportunityUpdates(120); const missingDeadlines = persisted.filter(item => !item.deadline && item.state !== 'dismissed').slice(0, 30); for (const item of missingDeadlines) await verifyOpportunity(item.id); return json({ scannedAt: now(), sources }); }],
   'POST /api/opportunities/import': [requireAuth(), requirePermission('bids.create'), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const title = text(b.title, 'title'); const organisation = text(b.organisation, 'organisation', 'Unknown organisation'); const deadline = text(b.deadline, 'deadline'); const url = text(b.url, 'url'); const category = text(b.category, 'category', 'Other'); const reference = text(b.reference, 'reference'); if (!title || !deadline || !validDeadline(deadline)) return error('A valid title and deadline are required to import an opportunity.', 400); if (!validUrl(url)) return error('Only http and https source URLs are allowed.', 400); const cats = await listAll<{ name: string; active: boolean }>('categories'); if (!cats.some(c => c.active && c.name === category)) return error('Category is not active.', 400); const existing = await listAll<Tender>('tenders'); const duplicate = existing.find(t => (reference && t.reference && t.reference.toLowerCase() === reference.toLowerCase()) || (url && t.url && t.url === url)); if (duplicate) return json({ duplicate: true, tender: duplicate }); const [id] = await db.add('tenders', [{ title, organisation, reference, description: text(b.description, 'description'), deadline, source: text(b.source, 'source'), url, category, status: 'New', assigneeId: '', submittedBy: u.id, submittedAt: now(), notes: text(b.notes, 'notes'), revision: 1 }]); if (!id) return error('Could not import opportunity.', 500); const opportunityUpdateId = text(b.opportunityUpdateId, 'reference'); if (opportunityUpdateId) { const update = await getById<Record<string, unknown>>('opportunity_updates', opportunityUpdateId); if (update) await db.update('opportunity_updates', [{ id: update.id, record: { ...update, state: 'imported', importedTenderId: id, lastSeenAt: now() } }]); } await tenderLog(id, ctx, 'imported an opportunity', text(b.source, 'source')); return json({ duplicate: false, tender: await getById<Tender>('tenders', id) }, 201); }],
   'GET /api/kpis': [requireAuth(), requirePermission('bids.view'), async ctx => { const u = await actor(ctx); return json({ kpis: await buildKpis(ctx, u) }); }],
   'GET /api/tenders': [requireAuth(), requirePermission('bids.view'), async () => json({ tenders: (await listAll<Tender>('tenders')).map(t => ({ ...t, revision: Number(t.revision || 1) })) })],
@@ -308,27 +287,9 @@ export const handler = router({
   'GET /api/tenders/:id/activity': [requireAuth(), requirePermission('bids.view'), async ctx => { if (!(await requireTender(ctx.params.id))) return error('Bid not found.', 404); const a = await listAll<{ tenderId: string; actorName: string; action: string; detail: string; createdAt: string }>('activity'); return json({ activities: a.filter(x => x.tenderId === ctx.params.id).sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime()) }); }],
   'GET /api/notifications': [requireAuth(), requirePermission('notifications.view'), async ctx => { const n = await listAll<{ userId: string; title: string; body: string; read: boolean; createdAt: string }>('notifications'); return json({ notifications: n.filter(x => x.userId === ctx.user!.userId).sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime()) }); }],
   'POST /api/notifications/:id/read': [requireAuth(), requirePermission('notifications.view'), async ctx => { const n = await getById<{ userId: string; read: boolean }> ('notifications', ctx.params.id); if (!n || n.userId !== ctx.user!.userId) return error('Notification not found.', 404); await db.update('notifications', [{ id: n.id, record: { ...n, read: true } }]); return json({ ok: true }); }], 'POST /api/notifications/read-all': [requireAuth(), requirePermission('notifications.view'), async ctx => { const notes = await listAll<{ userId: string; read: boolean }>('notifications'); const mine = notes.filter(n => n.userId === ctx.user!.userId && !n.read); if (mine.length) await db.update('notifications', mine.map(n => ({ id: n.id, record: { ...n, read: true } }))); return json({ ok: true }); }], 'DELETE /api/notifications': [requireAuth(), requirePermission('notifications.view'), async ctx => { const notes = await listAll<{ userId: string }>('notifications'); const mine = notes.filter(n => n.userId === ctx.user!.userId); if (mine.length) await db.delete('notifications', mine.map(n => n.id)); return json({ ok: true }); }],
-  'GET /api/admin/users': [requireAuth(), requirePermission('users.view'), async () => {
-    const users = await listAll<User>('users');
-    const unique = new Map<string, User>();
-    for (const user of users) {
-      const key = user.email.trim().toLowerCase();
-      const existing = unique.get(key);
-      if (!existing || new Date(user.updatedAt || user.createdAt).getTime() > new Date(existing.updatedAt || existing.createdAt).getTime()) unique.set(key, user);
-    }
-    return json({ users: Array.from(unique.values()) });
-  }],
+  'GET /api/admin/users': [requireAuth(), requirePermission('users.view'), async () => json({ users: await listAll<User>('users') })],
   'POST /api/admin/users': [requireAuth(), requirePermission('users.manage'), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const email = text(b.email, 'reference').toLowerCase(); const name = text(b.name, 'title'); const roleId = String(b.roleId || ''); if (!validEmail(email) || !roleId) return error('A valid email and role are required.', 400); if (email === SUPER_ADMIN_EMAIL) return error('The protected Super Admin identity is managed separately.', 403); const role = await getById<Role>('roles', roleId); if (!role) return error('Selected role was not found.', 400); if (roleHasSensitive(role) && u.role?.name !== 'Super Admin') return error('Only the protected Super Admin can provision sensitive access roles.', 403); const users = await listAll<User>('users'); if (users.some(x => x.email.toLowerCase() === email)) return error('A user with that email already exists.', 409); const [id] = await db.add('users', [{ email, name: name || email.split('@')[0], roleId, active: true, status: 'Provisioned', createdAt: now(), updatedAt: now() }]); await securityLog(ctx, 'user.provisioned', email, role.name); return json({ user: await getById<User>('users', id || '') }, 201); }],
   'PUT /api/admin/users/:id': [requireAuth(), requirePermission('users.manage'), async ctx => { const actorUser = await actor(ctx); const old = await getById<User>('users', ctx.params.id); if (!old) return error('User not found.', 404); if (old.email.toLowerCase() === SUPER_ADMIN_EMAIL) return error('The protected Super Admin account cannot be changed here.', 403); const b = ctx.body as Record<string, unknown>; const next = { ...old }; if (b.name !== undefined) next.name = text(b.name, 'title'); if (b.roleId !== undefined) { const role = await getById<Role>('roles', String(b.roleId)); if (!role) return error('Selected role was not found.', 400); if (roleHasSensitive(role) && actorUser.role?.name !== 'Super Admin') return error('Only the protected Super Admin can assign sensitive access roles.', 403); next.roleId = role.id; } if (b.active !== undefined) next.active = Boolean(b.active); if (b.status !== undefined) { const status = String(b.status); if (!['Provisioned', 'Active', 'Suspended'].includes(status)) return error('Invalid user status.', 400); next.status = status as User['status']; } next.updatedAt = now(); await db.update('users', [{ id: old.id, record: next }]); await securityLog(ctx, 'user.access_changed', old.email, JSON.stringify({ roleId: next.roleId, active: next.active, status: next.status })); return json({ user: next }); }],
-  'DELETE /api/admin/users/:id': [requireAuth(), requirePermission('users.manage'), async ctx => {
-    const u = await actor(ctx);
-    const target = await getById<User>('users', ctx.params.id);
-    if (!target) return error('User not found.', 404);
-    if (target.email.toLowerCase() === SUPER_ADMIN_EMAIL) return error('The protected Super Admin account cannot be deleted.', 403);
-    await securityLog(ctx, 'user.deleted', target.email, JSON.stringify({ userId: target.userId || null, roleId: target.roleId }));
-    await db.delete('users', [target.id]);
-    return json({ ok: true });
-  }],
   'GET /api/admin/roles': [requireAuth(), requirePermission('roles.view'), async () => json({ roles: await listAll<Role>('roles'), permissions: PERMISSIONS })],
   'POST /api/admin/roles': [requireAuth(), requirePermission('roles.manage'), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); const description = text(b.description, 'description'); const permissions = Array.isArray(b.permissions) ? b.permissions.filter((x): x is Permission => PERMISSIONS.some(p => p.key === x)) : []; if (!name) return error('Role name is required.', 400); if (u.role?.name !== 'Super Admin' && permissions.some(p => SENSITIVE_PERMISSIONS.includes(p))) return error('Sensitive permissions can only be allocated by the protected Super Admin.', 403); const roles = await listAll<Role>('roles'); if (roles.some(x => x.name.toLowerCase() === name.toLowerCase())) return error('A role with that name already exists.', 409); const [id] = await db.add('roles', [{ name, description, permissions, system: false, createdAt: now(), updatedAt: now() }]); await securityLog(ctx, 'role.created', name, permissions.join(', ')); return json({ role: await getById<Role>('roles', id || '') }, 201); }],
   'PUT /api/admin/roles/:id': [requireAuth(), requirePermission('roles.manage'), async ctx => { const u = await actor(ctx); const old = await getById<Role>('roles', ctx.params.id); if (!old) return error('Role not found.', 404); if (old.system) return error('System roles are protected. Create a custom role instead.', 403); const b = ctx.body as Record<string, unknown>; const permissions = Array.isArray(b.permissions) ? b.permissions.filter((x): x is Permission => PERMISSIONS.some(p => p.key === x)) : old.permissions; if (u.role?.name !== 'Super Admin' && permissions.some(p => SENSITIVE_PERMISSIONS.includes(p))) return error('Sensitive permissions can only be allocated by the protected Super Admin.', 403); const next = { ...old, name: text(b.name, 'title', old.name), description: text(b.description, 'description', old.description), permissions, updatedAt: now() }; if (!next.name) return error('Role name is required.', 400); await db.update('roles', [{ id: old.id, record: next }]); await securityLog(ctx, 'role.updated', old.name, permissions.join(', ')); return json({ role: next }); }],

@@ -1159,6 +1159,38 @@ td small {
   }
 }
 @media (max-width: 480px) {
+  .dashboard-list-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px 9px;
+  }
+  .dashboard-list-head span:last-child {
+    width: 100%;
+    text-align: left;
+    line-height: 1.4;
+  }
+  .dashboard-bid-card {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 14px;
+  }
+  .dashboard-bid-meta {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "date status"
+      "urgency action";
+    align-items: center;
+    justify-items: start;
+    gap: 6px 10px;
+    padding-top: 2px;
+  }
+  .dashboard-bid-meta strong { grid-area: date; }
+  .dashboard-bid-meta .urgency { grid-area: urgency; }
+  .dashboard-bid-meta .status { grid-area: status; justify-self: end; }
+  .dashboard-bid-meta .dashboard-open-action { grid-area: action; justify-self: end; }
+
   .main { padding: 16px 10px 28px; }
   .page-head { gap: 12px; margin-bottom: 16px; }
   .page-head > div { min-width: 0; }
@@ -1221,4 +1253,49 @@ td small {
   .user-chip {
     display: none;
   }
+}
+
+/* Procurement discovery workspace */
+.opportunity-filter-grid {
+  display:grid;
+  grid-template-columns:minmax(220px,2fr) repeat(4,minmax(140px,1fr));
+  gap:9px;
+  padding:12px 14px 14px;
+  border-top:1px solid #edf0f2;
+}
+.opportunity-filter-grid label { min-width:0; }
+.opportunity-filter-grid label > span { display:block; margin:0 0 5px; font-size:9px; font-weight:800; letter-spacing:.04em; color:#7b8791; text-transform:uppercase; }
+.opportunity-filter-grid select,
+.opportunity-filter-grid input { width:100%; min-width:0; height:34px; border:1px solid #d5dce0; border-radius:6px; background:#fff; color:#35414a; font-size:11px; padding:0 9px; outline:0; }
+.opportunity-filter-grid select:focus,
+.opportunity-filter-grid input:focus { border-color:#aebbc4; box-shadow:0 0 0 2px rgba(53,95,122,.08); }
+.opportunity-toolbar-main { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 14px; }
+.opportunity-toolbar-main > span { color:#74808a; font-size:10px; }
+.opportunity-page-size { display:flex; align-items:center; gap:6px; margin-left:auto; color:#7d8891; font-size:10px; }
+.opportunity-page-size select { height:30px; border:1px solid #d5dce0; border-radius:5px; background:#fff; padding:0 7px; font-size:10px; color:#46535d; }
+.opportunity-source-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:10px 0; }
+.opportunity-source-health { border:1px solid #dfe5e8; border-radius:7px; background:#fff; padding:10px 11px; min-width:0; }
+.opportunity-source-health > div { display:flex; align-items:center; gap:7px; min-width:0; }
+.opportunity-source-health b { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; color:#35414a; }
+.opportunity-source-health small { display:block; margin-top:6px; color:#8a949c; font-size:9px; }
+.opportunity-fit { display:inline-flex; align-items:center; padding:2px 6px; border-radius:4px; background:#f1f4f6; color:#5a6872; font-size:9px; font-weight:700; }
+.opportunity-capabilities { display:block; color:#7a8790; font-size:10px; line-height:1.35; margin-top:3px; }
+.opportunity-toolbar { overflow:hidden; }
+@media (max-width: 1050px) {
+  .opportunity-filter-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .opportunity-filter-grid label:first-child { grid-column:1 / -1; }
+  .opportunity-source-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 620px) {
+  .opportunity-filter-grid { grid-template-columns:1fr 1fr; gap:8px; }
+  .opportunity-filter-grid label:first-child { grid-column:1 / -1; }
+  .opportunity-source-strip { grid-template-columns:1fr; }
+  .opportunity-toolbar-main { align-items:flex-start; }
+  .opportunity-page-size { margin-left:0; }
+  .opportunity-source-health { padding:9px 10px; }
+}
+@media (max-width: 420px) {
+  .opportunity-filter-grid { grid-template-columns:1fr; }
+  .opportunity-filter-grid label:first-child { grid-column:auto; }
+  .opportunity-toolbar-main > span { width:100%; }
 }

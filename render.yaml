@@ -3,8 +3,8 @@ services:
     name: bidwatch
     runtime: node
     plan: free
-    branch: migration/render-supabase
-    autoDeploy: true
+    branch: main
+    autoDeployTrigger: checksPass
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /healthz

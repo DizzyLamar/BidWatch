@@ -1,13 +1,13 @@
 # BidWatch portable deployment
 
-BidWatch is being moved from the AppDeploy runtime to a conventional, portable stack:
+BidWatch runs on a conventional, portable stack:
 
 - Render Web Service — one Node/Express service serves both the React build and /api/*.
 - Supabase — Postgres-backed application data, Google authentication and private object storage.
 - GitHub Actions — CI remains the source of truth and can run the daily reminder job without a paid Render cron service.
 - Resend — remains the planned transactional email provider.
 
-The existing API contract is preserved so the React workspace does not need a platform-specific rewrite.
+The API contract is implemented by the Express server and backed by Supabase, so the React workspace does not depend on a deployment vendor.
 
 ## Required environment
 
@@ -54,9 +54,10 @@ The scheduled GitHub Actions job should send X-Cron-Secret to the Render service
 
 ## Migration safety
 
-Do not delete the AppDeploy application until the replacement has passed:
+Render is now the deployment target. The old AppDeploy deployment workflow is intentionally removed from GitHub Actions.
 
-1. Supabase schema/storage setup.
+Before treating the Render service as production-ready, verify:
+1. Supabase schema and private storage setup.
 2. Google sign-in.
 3. Provisioned-user RBAC.
 4. Tender CRUD and optimistic concurrency.
@@ -65,6 +66,6 @@ Do not delete the AppDeploy application until the replacement has passed:
 7. Opportunities and deadline verification.
 8. KPIs and administration.
 9. Reminder execution.
-10. Existing-data export/import, if the current AppDeploy workspace contains records that must be retained.
+10. Existing-data export/import if any legacy records must be retained.
 
-No AppDeploy data is deleted by this branch.
+No legacy platform data is deleted by this branch.
