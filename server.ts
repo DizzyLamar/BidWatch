@@ -20,7 +20,13 @@ app.use((_req, res, next) => {
   next();
 });
 
-app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'bidwatch' }));
+app.get('/healthz', (_req, res) => res.json({
+  ok: true,
+  service: 'bidwatch',
+  build: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'unknown',
+  supabaseConfigured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY),
+}));
+
 app.use(handler);
 
 const dist = path.join(__dirname, 'dist');
