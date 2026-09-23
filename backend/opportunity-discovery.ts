@@ -1,4 +1,4 @@
-import { db } from '@appdeploy/sdk';
+import { db } from './runtime';
 
 export const OPPORTUNITY_SOURCES = [
   { id: 'maneps', name: 'MANePS procurement notices', url: 'https://maneps.mw/procurement-notice', kind: 'api' as const },
@@ -383,7 +383,7 @@ function extractOcdsCandidates(payload: unknown): Array<Record<string, unknown>>
         seen.add(key);
         candidates.push({
           id: tender.id, tenderId: tender.id, title: tender.title, description: tender.description,
-          category: Array.isArray(tender.items) ? tender.items.map(item => typeof item === 'object' ? text((item as Record<string, unknown>).description) : '').join(' ') : '',
+          category: Array.isArray(tender.items) ? (tender.items as unknown[]).map((item: unknown) => typeof item === 'object' && item !== null ? text((item as Record<string, unknown>).description) : '').join(' ') : '',
           procurementMethod: tender.procurementMethodDetails || tender.procurementMethod,
           noticeType: Array.isArray(release.tag) ? release.tag.join(', ') : '',
           deadline: typeof tender.tenderPeriod === 'object' && tender.tenderPeriod ? (tender.tenderPeriod as Record<string, unknown>).end : '',
@@ -404,7 +404,7 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
   const apiBase = 'https://maneps.mw/rms/api/ocds';
   try {
     const index = await fetchJson(apiBase + '/get-records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skip: 0, take: 250 }) });
-    const items = Array.isArray(index?.items) ? index.items : [];
+    const items: Array<Record<string, unknown>> = Array.isArray(index?.items) ? index.items as Array<Record<string, unknown>> : [];
     const details = await Promise.all(items.slice(0, 120).map(async item => {
       const ocid = text(item?.ocid); if (!ocid) return null;
       try { return await fetchJson(apiBase + '/record-package/' + encodeURIComponent(ocid)); }
