@@ -466,19 +466,44 @@ export async function persistOpportunityUpdates(results: OpportunitySourceResult
   return timestamp;
 }
 
-export async function listOpportunityUpdates(limit = 30) {
+export async function listOpportunityUpdates(limit = 100) {
   const result = await db.list<OpportunityUpdate>('opportunity_updates', { limit: 2000 });
   const current = result.items.filter(item => item.state !== 'dismissed');
-  const byReference = new Map<string, Set<string>>();
+
+  // Discovery is persisted per source so provenance is never lost. The UI, however,
+  // should not make the same procurement notice look like multiple opportunities.
+  // Collapse corroborating records by procurement reference first, then canonical URL,
+  // while retaining every source in alsoListedOn.
+  const groups = new Map<string, OpportunityUpdate[]>();
   for (const item of current) {
-    const reference = text(item.reference).toLowerCase(); if (!reference) continue;
-    const sources = byReference.get(reference) || new Set<string>(); sources.add(item.source); byReference.set(reference, sources);
+    const reference = text(item.reference).toLowerCase();
+    const canonicalUrl = text(item.url).toLowerCase().replace(/#.*$/, '').replace(/\/$/, '');
+    const contentKey = item.contentHash ? 'content:' + item.contentHash : 'title:' + normalizeForMatch(text(item.title));
+    const key = reference ? 'reference:' + reference
+      : canonicalUrl ? 'url:' + canonicalUrl
+      : contentKey;
+    const group = groups.get(key) || [];
+    group.push(item);
+    groups.set(key, group);
   }
-  return current.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0) || new Date(b.lastSeenAt || b.firstSeenAt).getTime() - new Date(a.lastSeenAt || a.firstSeenAt).getTime())
-    .slice(0, limit)
-    .map(item => {
-      const reference = text(item.reference).toLowerCase();
-      const sources = reference ? Array.from(byReference.get(reference) || []).filter(source => source !== item.source) : [];
-      return { ...item, alsoListedOn: sources };
-    });
+
+  const merged = Array.from(groups.values()).map(group => {
+    const ranked = [...group].sort((a, b) =>
+      (b.relevanceScore || 0) - (a.relevanceScore || 0) ||
+      new Date(b.lastSeenAt || b.firstSeenAt).getTime() - new Date(a.lastSeenAt || a.firstSeenAt).getTime()
+    );
+    const representative = ranked[0];
+    const sources = Array.from(new Set(group.map(item => item.source))).filter(Boolean);
+    return {
+      ...representative,
+      alsoListedOn: sources.filter(source => source !== representative.source),
+    };
+  });
+
+  return merged
+    .sort((a, b) =>
+      (b.relevanceScore || 0) - (a.relevanceScore || 0) ||
+      new Date(b.lastSeenAt || b.firstSeenAt).getTime() - new Date(a.lastSeenAt || a.firstSeenAt).getTime()
+    )
+    .slice(0, limit);
 }
