@@ -5,11 +5,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 const STORAGE_BUCKET = process.env.BIDWATCH_STORAGE_BUCKET || 'bidwatch';
 
-if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) throw new Error('SUPABASE_URL and SUPABASE_SECRET_KEY are required.');
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
+// Keep the process bootable so Render's /healthz can report configuration problems.
+// Protected application routes fail explicitly through requireAuth/db operations.
+const supabase = SUPABASE_URL && SUPABASE_SECRET_KEY ? createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
   auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
-});
+}) : null;
 
 export type RouterContext = {
   body: unknown;
@@ -70,6 +70,7 @@ export function router(routes: RouteMap) {
 
 export function requireAuth() {
   return async (ctx: RouterContext) => {
+    if (!supabase) return error('BidWatch server is missing its Supabase configuration.', 503);
     const header = ctx.req.headers.authorization || '';
     const match = header.match(/^Bearer\s+(.+)$/i);
     if (!match) return error('Authentication required.', 401);
@@ -84,6 +85,7 @@ export function requireAuth() {
 type RecordRow = { id: string; table_name: string; record: Record<string, unknown> };
 
 async function checked<T>(result: { data: T | null; error: any }) {
+  if (!supabase) throw new Error('Supabase is not configured.');
   if (result.error) throw new Error(result.error.message);
   return result.data as T;
 }
@@ -129,23 +131,27 @@ export const db = {
 
 export const storageService = {
   async put(path: string, content: string, contentType: string) {
+    if (!supabase) throw new Error('Supabase is not configured.');
     const result = await supabase.storage.from(STORAGE_BUCKET).upload(path, Buffer.from(content, 'base64'), {
       contentType, upsert: false,
     });
     return !result.error;
   },
   async getUrl(path: string) {
+    if (!supabase) throw new Error('Supabase is not configured.');
     const result = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(path, 3600);
     if (result.error || !result.data?.signedUrl) throw new Error(result.error?.message || 'Could not create file URL.');
     return result.data.signedUrl;
   },
   async delete(paths: string[]) {
+    if (!supabase) return paths.map(() => false);
     if (!paths.length) return [];
     const result = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
     if (result.error) return paths.map(() => false);
     return paths.map(() => true);
   },
   async listAll(prefix: string, maxFiles: number) {
+    if (!supabase) throw new Error('Supabase is not configured.');
     const root = prefix.replace(/^\/+|\/+$/g, '');
     const paths: string[] = [];
     async function walk(folder: string): Promise<void> {
