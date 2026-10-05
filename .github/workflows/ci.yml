@@ -58,14 +58,16 @@ jobs:
       - name: Wait for the expected Render build
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
+          RENDER_APP_URL: https://bidwatch-gk3r.onrender.com
         run: |
           set -e
+          HEALTH_URL="${RENDER_APP_URL%/}/healthz"
           echo "Waiting for Render to serve commit $EXPECTED_COMMIT"
-          echo "Resolving bidwatch.onrender.com:"
-          getent hosts bidwatch.onrender.com || true
+          echo "Resolving ${RENDER_APP_URL#https://}:"
+          getent hosts "${RENDER_APP_URL#https://}" || true
 
           for i in {1..90}; do
-            status=$(curl --silent --show-error --output /tmp/health.json --write-out "%{http_code}" --max-time 10 https://bidwatch.onrender.com/healthz || true)
+            status=$(curl --silent --show-error --output /tmp/health.json --write-out "%{http_code}" --max-time 10 "$HEALTH_URL" || true)
             body=$(cat /tmp/health.json 2>/dev/null || true)
 
             if printf '%s' "$body" | grep -qi 'Service Suspended'; then
