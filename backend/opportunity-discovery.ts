@@ -67,6 +67,11 @@ export type OpportunitySourceResult = {
 export type OpportunityUpdate = Opportunity & {
   id: string; state: 'new' | 'imported' | 'dismissed'; firstSeenAt: string; lastSeenAt: string; importedTenderId?: string;
 };
+export type OpportunityChange = {
+  id: string; opportunityUpdateId: string; reference?: string; title?: string; source: string;
+  changedFields: string[]; before: Record<string, unknown>; after: Record<string, unknown>; detectedAt: string;
+};
+export type OpportunitySourceRun = OpportunitySourceResult & { id: string; scanType: 'scheduled' | 'manual' };
 
 function text(value: unknown) { return String(value ?? '').replace(/\s+/g, ' ').trim(); }
 function firstString(...values: unknown[]) { return values.map(text).find(Boolean) || ''; }
@@ -436,17 +441,25 @@ function updateKey(item: Opportunity) {
   return item.sourceId + '|content|' + (item.contentHash || hashContent([item.title, item.organisation, item.deadline].join('|')));
 }
 
-export async function persistOpportunityUpdates(results: OpportunitySourceResult[]) {
+export async function persistOpportunityUpdates(results: OpportunitySourceResult[], scanType: 'scheduled' | 'manual' = 'manual') {
   const existing = await db.list<OpportunityUpdate>('opportunity_updates', { limit: 2000 });
   const byKey = new Map(existing.items.map(item => [updateKey(item), item]));
   const timestamp = new Date().toISOString();
-  for (const result of results) for (const opportunity of result.notices) {
-    const key = updateKey(opportunity); const current = byKey.get(key);
-    if (current) {
-      await db.update('opportunity_updates', [{ id: current.id, record: { ...current, ...opportunity, firstSeenAt: current.firstSeenAt || timestamp, lastSeenAt: timestamp } }]);
-    } else {
-      const [id] = await db.add('opportunity_updates', [{ ...opportunity, state: 'new', firstSeenAt: timestamp, lastSeenAt: timestamp }]);
-      if (id) byKey.set(key, { ...opportunity, id, state: 'new', firstSeenAt: timestamp, lastSeenAt: timestamp });
+  for (const result of results) {
+    await db.add('opportunity_source_runs', [{ ...result, scanType }]);
+    for (const opportunity of result.notices) {
+      const key = updateKey(opportunity); const current = byKey.get(key);
+      if (current) {
+        const fields = ['title','organisation','reference','deadline','description','noticeType','url','relevanceScore','relevanceLevel','fitLevel','classificationReason','contentHash'];
+        const changedFields = fields.filter(field => String((current as any)[field] ?? '') !== String((opportunity as any)[field] ?? ''));
+        if (changedFields.length) {
+          await db.add('opportunity_changes', [{ opportunityUpdateId: current.id, reference: opportunity.reference, title: opportunity.title, source: opportunity.source, changedFields, before: Object.fromEntries(changedFields.map(field => [field, (current as any)[field] ?? null])), after: Object.fromEntries(changedFields.map(field => [field, (opportunity as any)[field] ?? null])), detectedAt: timestamp }]);
+        }
+        await db.update('opportunity_updates', [{ id: current.id, record: { ...current, ...opportunity, firstSeenAt: current.firstSeenAt || timestamp, lastSeenAt: timestamp } }]);
+      } else {
+        const [id] = await db.add('opportunity_updates', [{ ...opportunity, state: 'new', firstSeenAt: timestamp, lastSeenAt: timestamp }]);
+        if (id) byKey.set(key, { ...opportunity, id, state: 'new', firstSeenAt: timestamp, lastSeenAt: timestamp });
+      }
     }
   }
   return timestamp;
