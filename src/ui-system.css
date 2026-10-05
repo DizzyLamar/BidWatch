@@ -323,3 +323,8 @@ td small { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .workspace-row-main input { width: 100%; }
 .workspace-row-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
 @media (max-width: 700px) { .inline-form { grid-template-columns: 1fr; align-items: stretch; } .workspace-row { align-items: flex-start; flex-direction: column; } .workspace-row-actions { width: 100%; justify-content: flex-end; } .workspace-row-actions select { min-width: 150px; } }
+
+.opportunity-watchlist-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 0 0; }
+.opportunity-watchlist-bar > select { min-width: 170px; }
+.opportunity-watchlist-bar > input { min-width: 190px; flex: 1 1 220px; }
+.opportunity-watchlist-list { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
