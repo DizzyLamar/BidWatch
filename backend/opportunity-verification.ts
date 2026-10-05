@@ -31,7 +31,7 @@ type OpportunityUpdate = {
   details?: OpportunityDetails;
 };
 
-const ALLOWED_SOURCE_HOSTS = ['pppc.mw', 'ppda.mw', 'maneps.mw'];
+const ALLOWED_SOURCE_HOSTS = ['pppc.mw', 'ppda.mw', 'maneps.mw', 'careersmw.com', 'malawi.gov.mw'];
 function allowedSourceUrl(value: string) { try { const url = new URL(value); if (url.protocol !== 'https:' || url.port) return false; const host = url.hostname.toLowerCase(); return ALLOWED_SOURCE_HOSTS.some(domain => host === domain || host.endsWith(`.${domain}`)); } catch { return false; } }
 const TERMS = ['cybersecurity', 'cyber security', 'information security', 'penetration testing', 'penetration test', 'vulnerability assessment', 'security assessment', 'security audit', 'soc', 'siem', 'endpoint security', 'edr', 'xdr', 'firewall', 'network security', 'identity and access management', 'iam', 'zero trust', 'privileged access', 'mfa', 'multi-factor authentication', 'data protection', 'privacy', 'digital forensics', 'incident response', 'iso 27001', 'pci dss', 'dlp', 'managed detection', 'managed security', 'cloud security', 'ict', 'information technology', 'information systems', 'software', 'network', 'server', 'cloud', 'data analytics', 'database', 'application development', 'it support', 'helpdesk', 'telecommunications', 'consultancy', 'rfp', 'rfq', 'tender'];
 function text(value: unknown) { return String(value ?? '').replace(/\s+/g, ' ').trim(); }
@@ -101,7 +101,15 @@ export async function verifyOpportunity(id: string) {
       .map(match => match[1])
       .filter(url => /pdf|docx?|xlsx?|pptx?|download|attachment/i.test(url))
       .slice(0, 20)
-      .map(url => ({ title: url.split('/').pop() || 'Source document', url }));
+      .map(url => {
+        try {
+          const absolute = new URL(url, targetUrl).toString();
+          return { title: absolute.split('/').pop()?.split('?')[0] || 'Source document', url: absolute };
+        } catch {
+          return null;
+        }
+      })
+      .filter((item): item is { title: string; url: string } => Boolean(item));
 
     const next: OpportunityUpdate = {
       ...current,
