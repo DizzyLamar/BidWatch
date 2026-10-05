@@ -1317,11 +1317,12 @@ function TenderDrawer({
   async function saveChanges() {
     setBusy(true);
     try {
-      await api.put(`/api/tenders/${tender.id}`, {
+      const response = await api.put(`/api/tenders/${tender.id}`, {
         status,
         assigneeId: assignee,
         expectedRevision: revision,
       });
+      setRevision(Number(response.data.tender?.revision || revision + 1));
       invalidateApiCache(['/api/tenders', `/api/tenders/${tender.id}/`, '/api/kpis', '/api/history']);
       await onChanged();
       setNotice('Bid updated.');
@@ -1476,7 +1477,7 @@ function TenderDrawer({
                   value={status}
                   onChange={e => setStatus(e.target.value)}
                 >
-                  {STATUSES.filter(s => s !== 'Applied').map(s => (
+                  {STATUSES.filter(s => !['Applied', 'Declined'].includes(s)).map(s => (
                     <option key={s}>{s}</option>
                   ))}
                 </select>
@@ -1485,6 +1486,7 @@ function TenderDrawer({
                 <select
                   value={assignee}
                   onChange={e => setAssignee(e.target.value)}
+                  disabled={!profile.permissions?.includes('bids.assign') || busy}
                 >
                   <option value="">Unassigned</option>
                   {users.map((u: User) => (
@@ -1550,6 +1552,7 @@ function TenderDrawer({
               <section className="apply-box">
                 <h3>Record submission</h3>
                 <p>Record enough evidence for another team member to verify that the bid was actually submitted.</p>
+                {tender.status !== 'Ready to Submit' && <div className="form-error">Move the bid to <b>Ready to Submit</b> after the final compliance and submission checks. Only then can it be recorded as Applied.</div>}
                 <div className="form-grid">
                   <Field label="Submission method *"><select value={subMethod} onChange={e => setSubMethod(e.target.value)}><option value="">Select method</option><option>MANePS</option><option>Portal upload</option><option>Email</option><option>Physical submission</option><option>Courier</option><option>Other</option></select></Field>
                   <Field label="Submission reference"><input value={subRef} onChange={e => setSubRef(e.target.value)} placeholder="Receipt / acknowledgement / reference" /></Field>
@@ -1559,7 +1562,7 @@ function TenderDrawer({
                 <button
                   className="primary wide"
                   onClick={requestApply}
-                  disabled={busy}
+                  disabled={busy || tender.status !== 'Ready to Submit' || !subMethod || (!subRef && !subReceipt && !subNotes)}
                 >
                   <Check size={17} /> Confirm submission
                 </button>
