@@ -79,7 +79,8 @@ jobs:
 
             if [ "$status" = "200" ]; then
               echo "Render health response: $body"
-              build=$(printf '%s' "$body" | node -p 'let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{try{console.log(JSON.parse(s).build||"")}catch{console.log("")}})' 2>/dev/null || true)
+              build=$(printf '%s' "$body" | node -e 'let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{try{process.stdout.write(String(JSON.parse(s).build || ""))}catch{process.stdout.write("")}})' 2>/dev/null || true)
+              build=$(printf '%s' "$build" | tr -d '\r\n')
 
               if [ "$build" = "$EXPECTED_COMMIT" ]; then
                 echo "Render is healthy and serving the expected commit."
