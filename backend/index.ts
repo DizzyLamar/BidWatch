@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { db, router, json, error, requireAuth, type RouterContext } from './runtime';
 import { storageService } from './storage';
 import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES } from './opportunity-discovery';
@@ -75,7 +76,7 @@ function validCronSecret(ctx: RouterContext) {
   if (!expected || !supplied) return false;
   const expectedBytes = Buffer.from(expected);
   const suppliedBytes = Buffer.from(supplied);
-  return expectedBytes.length === suppliedBytes.length && require('node:crypto').timingSafeEqual(expectedBytes, suppliedBytes);
+  return expectedBytes.length === suppliedBytes.length && timingSafeEqual(expectedBytes, suppliedBytes);
 }
 
 const REQUEST_LIMITS = new Map<string, { count: number; resetAt: number }>();
