@@ -491,14 +491,34 @@ async function scanManeps(): Promise<OpportunitySourceResult> {
   try {
     const index = await fetchJson(apiBase + '/get-records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skip: 0, take: 250 }) });
     const items: Array<Record<string, unknown>> = Array.isArray(index?.items) ? index.items as Array<Record<string, unknown>> : [];
-    const details = await Promise.all(items.slice(0, 120).map(async item => {
-      const ocid = text(item?.ocid); if (!ocid) return null;
-      try { return await fetchJson(apiBase + '/record-package/' + encodeURIComponent(ocid)); }
-      catch { try { return await fetchJson(apiBase + '/release-package/' + encodeURIComponent(ocid)); } catch { return null; } }
+    const detailResults = await Promise.all(items.slice(0, 120).map(async item => {
+      const ocid = text(item?.ocid);
+      if (!ocid) return { payload: null, failed: true };
+      try {
+        return { payload: await fetchJson(apiBase + '/record-package/' + encodeURIComponent(ocid)), failed: false };
+      } catch {
+        try {
+          return { payload: await fetchJson(apiBase + '/release-package/' + encodeURIComponent(ocid)), failed: false };
+        } catch {
+          return { payload: null, failed: true };
+        }
+      }
     }));
-    const notices = details.flatMap(payload => extractOcdsCandidates(payload).map(candidate => normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference))).filter((item): item is Opportunity => Boolean(item)));
-    const unique = new Map<string, Opportunity>(); for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
-    return sourceResult(source, started, items.length, items.length, Array.from(unique.values()).slice(0, 100), 0, 'MANePS OCDS API returned ' + items.length + ' records; ' + unique.size + ' matched the technology classifier.', 'ok', 'public-ocds-api');
+    const parsedDetails = detailResults.filter(item => item.payload !== null);
+    const failedDetails = detailResults.filter(item => item.failed).length;
+    const notices = parsedDetails.flatMap(item =>
+      extractOcdsCandidates(item.payload)
+        .map(candidate => normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference)))
+        .filter((item): item is Opportunity => Boolean(item))
+    );
+    const unique = new Map<string, Opportunity>();
+    for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
+    return sourceResult(
+      source, started, items.length, parsedDetails.length, Array.from(unique.values()).slice(0, 100), failedDetails,
+      'MANePS OCDS API returned ' + items.length + ' index records; parsed ' + parsedDetails.length +
+      ' detail records; ' + unique.size + ' matched the technology classifier.',
+      'ok', 'public-ocds-api'
+    );
   } catch {
     return sourceResult(source, started, 0, 0, [], 1, 'MANePS public OCDS endpoint could not be reached. BidWatch did not use a supplier login or browser session.', 'error', 'public-ocds-api');
   }
