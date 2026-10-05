@@ -444,8 +444,17 @@ export async function discoverPlatformOpportunities() {
   return results;
 }
 
+function normalizeIdentityPart(value: unknown) {
+  return normalizeForMatch(text(value))
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
 function updateKey(item: Opportunity) {
-  const reference = text(item.reference).toLowerCase();
+  const reference = normalizeIdentityPart(item.reference);
+  const organisation = normalizeIdentityPart(item.organisation);
+  if (reference && organisation) return item.sourceId + '|ref-org|' + reference + '|' + organisation;
   if (reference) return item.sourceId + '|ref|' + reference;
   const canonicalUrl = text(item.url).toLowerCase().replace(/#.*$/, '').replace(/\/$/, '');
   if (canonicalUrl) return item.sourceId + '|url|' + canonicalUrl;
@@ -453,30 +462,82 @@ function updateKey(item: Opportunity) {
 }
 
 export async function persistOpportunityUpdates(results: OpportunitySourceResult[], scanType: 'scheduled' | 'manual' = 'manual') {
-  const existing = await db.list<OpportunityUpdate>('opportunity_updates', { limit: 2000 });
+  const existing = await db.list<OpportunityUpdate & { sourceStatus?: string; sourceMissingAt?: string | null }>('opportunity_updates', { limit: 2000 });
   const byKey = new Map(existing.items.map(item => [updateKey(item), item]));
   const timestamp = new Date().toISOString();
+
   for (const result of results) {
     const { notices: _notices, ...sourceSummary } = result;
     await db.add('opportunity_source_runs', [{ ...sourceSummary, scanType }]);
+
+    const seenKeys = new Set<string>();
     for (const opportunity of result.notices) {
-      const key = updateKey(opportunity); const current = byKey.get(key);
+      const key = updateKey(opportunity);
+      seenKeys.add(key);
+      const current = byKey.get(key);
       if (current) {
-        const fields = ['title','organisation','reference','deadline','description','noticeType','url','relevanceScore','relevanceLevel','fitLevel','classificationReason','contentHash'];
-        const changedFields = fields.filter(field => String((current as any)[field] ?? '') !== String((opportunity as any)[field] ?? ''));
+        const fields = ['title','organisation','reference','deadline','description','noticeType','url','relevanceScore','relevanceLevel','fitLevel','classificationReason','contentHash','categories','matchedTerms'];
+        const changedFields = fields.filter(field => JSON.stringify((current as any)[field] ?? null) !== JSON.stringify((opportunity as any)[field] ?? null));
         if (changedFields.length) {
-          await db.add('opportunity_changes', [{ opportunityUpdateId: current.id, reference: opportunity.reference, title: opportunity.title, source: opportunity.source, changedFields, before: Object.fromEntries(changedFields.map(field => [field, (current as any)[field] ?? null])), after: Object.fromEntries(changedFields.map(field => [field, (opportunity as any)[field] ?? null])), detectedAt: timestamp }]);
+          await db.add('opportunity_changes', [{
+            opportunityUpdateId: current.id,
+            reference: opportunity.reference,
+            title: opportunity.title,
+            source: opportunity.source,
+            changedFields,
+            before: Object.fromEntries(changedFields.map(field => [field, (current as any)[field] ?? null])),
+            after: Object.fromEntries(changedFields.map(field => [field, (opportunity as any)[field] ?? null])),
+            detectedAt: timestamp
+          }]);
         }
-        await db.update('opportunity_updates', [{ id: current.id, record: { ...current, ...opportunity, firstSeenAt: current.firstSeenAt || timestamp, lastSeenAt: timestamp } }]);
+        await db.update('opportunity_updates', [{
+          id: current.id,
+          record: {
+            ...current,
+            ...opportunity,
+            sourceStatus: 'active',
+            sourceMissingAt: null,
+            firstSeenAt: current.firstSeenAt || timestamp,
+            lastSeenAt: timestamp
+          }
+        }]);
       } else {
-        const [id] = await db.add('opportunity_updates', [{ ...opportunity, state: 'new', firstSeenAt: timestamp, lastSeenAt: timestamp }]);
-        if (id) byKey.set(key, { ...opportunity, id, state: 'new', firstSeenAt: timestamp, lastSeenAt: timestamp });
+        const [id] = await db.add('opportunity_updates', [{
+          ...opportunity,
+          state: 'new',
+          sourceStatus: 'active',
+          sourceMissingAt: null,
+          firstSeenAt: timestamp,
+          lastSeenAt: timestamp
+        }]);
+        if (id) {
+          byKey.set(key, { ...opportunity, id, state: 'new', sourceStatus: 'active', sourceMissingAt: null, firstSeenAt: timestamp, lastSeenAt: timestamp });
+        }
+      }
+    }
+
+    // A source scan is a snapshot. If a previously seen notice is absent from
+    // a successful scan, retain it for history but mark it as no longer seen.
+    // Never delete or dismiss it automatically: a source can temporarily omit
+    // records, and the bid history must remain auditable.
+    if (result.status === 'ok') {
+      for (const current of existing.items.filter(item => item.sourceId === result.sourceId)) {
+        const key = updateKey(current);
+        if (seenKeys.has(key)) continue;
+        if ((current as any).sourceStatus === 'not-seen') continue;
+        await db.update('opportunity_updates', [{
+          id: current.id,
+          record: {
+            ...current,
+            sourceStatus: 'not-seen',
+            sourceMissingAt: timestamp
+          }
+        }]);
       }
     }
   }
   return timestamp;
 }
-
 export async function listOpportunityUpdates(limit = 100) {
   const result = await db.list<OpportunityUpdate>('opportunity_updates', { limit: 2000 });
   const current = result.items.filter(item => item.state !== 'dismissed');
@@ -487,10 +548,12 @@ export async function listOpportunityUpdates(limit = 100) {
   // while retaining every source in alsoListedOn.
   const groups = new Map<string, OpportunityUpdate[]>();
   for (const item of current) {
-    const reference = text(item.reference).toLowerCase();
+    const reference = normalizeIdentityPart(item.reference);
+    const organisation = normalizeIdentityPart(item.organisation);
     const canonicalUrl = text(item.url).toLowerCase().replace(/#.*$/, '').replace(/\/$/, '');
     const contentKey = item.contentHash ? 'content:' + item.contentHash : 'title:' + normalizeForMatch(text(item.title));
-    const key = reference ? 'reference:' + reference
+    const key = reference && organisation ? 'reference-org:' + reference + '|' + organisation
+      : reference ? 'reference:' + reference
       : canonicalUrl ? 'url:' + canonicalUrl
       : contentKey;
     const group = groups.get(key) || [];
