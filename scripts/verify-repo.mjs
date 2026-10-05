@@ -29,6 +29,12 @@ for (const [pattern, description] of [
   ["requirePermission('bids.delete')", 'server-side delete authorization'],
   ["requirePermission('bids.apply')", 'server-side Applied authorization'],
   ["requirePermission('bids.decline')", 'server-side Declined authorization'],
+  ["'PUT /api/tenders/:id': [requireAuth()", 'server-side ordinary bid edit authentication'],
+  ["u.permissions.includes('bids.edit')", 'server-side ordinary bid edit authorization'],
+  ["u.permissions.includes('bids.assign')", 'server-side assignment authorization'],
+  ["timingSafeEqual(expectedBytes, suppliedBytes)", 'constant-time cron secret comparison'],
+  ["'POST /api/internal/reminders'", 'scheduled reminder endpoint'],
+  ["'POST /api/internal/opportunity-scan'", 'scheduled opportunity scan endpoint'],
   ['storageService.delete', 'managed storage deletion'],
 ]) {
   if (!backend.includes(pattern)) failures.push(`Backend security/lifecycle regression: ${description} missing.`);
