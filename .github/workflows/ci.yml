@@ -43,32 +43,56 @@ jobs:
     needs: verify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 18
     steps:
       - name: Trigger Render deploy
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
+          set -e
           test -n "$RENDER_DEPLOY_HOOK_URL"
           curl --fail --silent --show-error --request POST --output /tmp/render-deploy.json "$RENDER_DEPLOY_HOOK_URL"
           echo "Render deploy hook response:"
           cat /tmp/render-deploy.json
 
-      - name: Wait for Render health check
+      - name: Wait for the expected Render build
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
         run: |
           set -e
+          echo "Waiting for Render to serve commit $EXPECTED_COMMIT"
           echo "Resolving bidwatch.onrender.com:"
           getent hosts bidwatch.onrender.com || true
-          for i in {1..48}; do
+
+          for i in {1..90}; do
             status=$(curl --silent --show-error --output /tmp/health.json --write-out "%{http_code}" --max-time 10 https://bidwatch.onrender.com/healthz || true)
-            if [ "$status" = "200" ]; then
-              echo "Render is healthy: $(cat /tmp/health.json)"
-              exit 0
+            body=$(cat /tmp/health.json 2>/dev/null || true)
+
+            if printf '%s' "$body" | grep -qi 'Service Suspended'; then
+              echo "Render reports the service is suspended."
+              echo "$body"
+              echo "The deploy hook was accepted, but Render has not made the service available."
+              exit 1
             fi
-            echo "Render not ready yet (HTTP $status), attempt $i/48"
+
+            if [ "$status" = "200" ]; then
+              echo "Render health response: $body"
+              build=$(printf '%s' "$body" | node -p 'let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{try{console.log(JSON.parse(s).build||"")}catch{console.log("")}})' 2>/dev/null || true)
+
+              if [ "$build" = "$EXPECTED_COMMIT" ]; then
+                echo "Render is healthy and serving the expected commit."
+                exit 0
+              fi
+
+              echo "Render is healthy, but still serving build '$build' (expected '$EXPECTED_COMMIT')."
+            else
+              echo "Render not ready yet (HTTP $status), attempt $i/90"
+            fi
+
             sleep 10
           done
-          echo "Render did not become healthy within 8 minutes."
+
+          echo "Render did not become healthy on the expected commit within 15 minutes."
           echo "Final health response:"
           cat /tmp/health.json 2>/dev/null || true
           exit 1
