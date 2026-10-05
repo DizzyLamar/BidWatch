@@ -319,44 +319,111 @@ function sourceResult(source: typeof OPPORTUNITY_SOURCES[number], started: numbe
 async function scanCareersMalawi(): Promise<OpportunitySourceResult> {
   const source = OPPORTUNITY_SOURCES.find(item => item.id === 'careersmw')!;
   const started = Date.now();
+
+  // Prefer the WordPress REST API: it returns article content in batches and
+  // avoids hammering individual Careers Malawi detail pages (which can trigger
+  // rate limiting after a small number of requests).
   try {
-    const html = await fetchText(source.url);
-    const links = linkCandidates(html, source.url)
-      .filter(link => link.url.startsWith('https://careersmw.com/'))
-      .filter(link => !/\/page\/\d+\/?$|\/category\/|\/tag\//i.test(link.url))
-      .slice(0, 80);
-    let failed = 0;
+    const apiUrl = 'https://careersmw.com/wp-json/wp/v2/posts?per_page=100&orderby=date&order=desc&_fields=id,date,link,title,content';
+    const payload = await fetchJson(apiUrl);
+    const posts = Array.isArray(payload) ? payload as Array<Record<string, unknown>> : [];
     const notices: Opportunity[] = [];
-    for (const link of links) {
+    let parsed = 0;
+    let failed = 0;
+
+    for (const post of posts) {
       try {
-        const detailHtml = await fetchText(link.url);
-        const articleText = decodeHtml(detailHtml);
-        const title = (detailHtml.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1] || detailHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || link.title);
+        const titleObj = post.title && typeof post.title === 'object' ? post.title as Record<string, unknown> : {};
+        const contentObj = post.content && typeof post.content === 'object' ? post.content as Record<string, unknown> : {};
+        const title = decodeHtml(text(titleObj.rendered));
+        const articleText = decodeHtml(text(contentObj.rendered));
+        if (!title || !articleText) { failed += 1; continue; }
+        parsed += 1;
+
         const candidate = {
-          title: decodeHtml(title),
+          title,
           organisation: extractOrganisation(articleText),
           reference: extractReference(articleText),
           deadline: extractDeadline(articleText),
-          publishedAt: extractDate(articleText.match(/(?:publication|published|date of publication|date issued|issue date)[^.;]{0,100}/i)?.[0] || ''),
+          publishedAt: dateString(post.date),
           description: articleText.slice(0, 12000),
           noticeType: /request for (?:proposal|quotation|expression)|consultancy/i.test(articleText) ? 'Tender / consultancy' : 'Tender / bid',
-          url: link.url,
+          url: firstString(post.link),
         };
         const notice = normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference), articleText);
         if (notice) {
-          notice.details = { publishedAt: dateString(candidate.publishedAt), procurementMethod: /national competitive bidding|ncb/i.test(articleText) ? 'National Competitive Bidding' : '' };
+          notice.details = {
+            publishedAt: dateString(candidate.publishedAt),
+            procurementMethod: /national competitive bidding|ncb/i.test(articleText) ? 'National Competitive Bidding' : ''
+          };
           notices.push(notice);
         }
       } catch { failed += 1; }
     }
+
     const unique = new Map<string, Opportunity>();
     for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
-    return sourceResult(source, started, links.length, links.length - failed, Array.from(unique.values()).slice(0, 80), failed, 'Parsed ' + links.length + ' Careers Malawi detail pages deterministically; ' + unique.size + ' matched the technology classifier.');
-  } catch (error) {
-    return sourceResult(source, started, 0, 0, [], 1, 'Careers Malawi could not be scanned: ' + (error instanceof Error ? error.message : 'unknown source error'), 'error');
+
+    return sourceResult(
+      source,
+      started,
+      posts.length,
+      parsed,
+      Array.from(unique.values()).slice(0, 100),
+      failed,
+      'Careers Malawi WordPress API returned ' + posts.length + ' posts; parsed ' + parsed + '; ' + unique.size + ' matched the technology classifier.'
+    );
+  } catch (apiError) {
+    // API failure is a source failure, not a reason to silently report zero
+    // procurement records. Fall back to the public listing page so the source
+    // remains discoverable when its REST API is temporarily unavailable.
+    try {
+      const html = await fetchText(source.url);
+      const links = linkCandidates(html, source.url)
+        .filter(link => link.url.startsWith('https://careersmw.com/'))
+        .filter(link => !/\/page\/\d+\/?$|\/category\/|\/tag\//i.test(link.url))
+        .slice(0, 40);
+
+      const notices: Opportunity[] = [];
+      let failed = 0;
+      let parsed = 0;
+
+      for (const link of links) {
+        try {
+          const detailHtml = await fetchText(link.url);
+          parsed += 1;
+          const articleText = decodeHtml(detailHtml);
+          const title = (detailHtml.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1]
+            || detailHtml.match(/<h1[^>]*>([\\s\\S]*?)<\/h1>/i)?.[1] || link.title);
+          const candidate = {
+            title: decodeHtml(title),
+            organisation: extractOrganisation(articleText),
+            reference: extractReference(articleText),
+            deadline: extractDeadline(articleText),
+            publishedAt: extractDate(articleText.match(/(?:publication|published|date of publication|date issued|issue date)[^.;]{0,100}/i)?.[0] || ''),
+            description: articleText.slice(0, 12000),
+            noticeType: /request for (?:proposal|quotation|expression)|consultancy/i.test(articleText) ? 'Tender / consultancy' : 'Tender / bid',
+            url: link.url,
+          };
+          const notice = normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference), articleText);
+          if (notice) notices.push(notice);
+        } catch { failed += 1; }
+      }
+
+      const unique = new Map<string, Opportunity>();
+      for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
+      return sourceResult(
+        source, started, links.length, parsed,
+        Array.from(unique.values()).slice(0, 80), failed,
+        'Careers Malawi REST API unavailable; fallback parsed ' + parsed + ' of ' + links.length + ' detail pages; ' + unique.size + ' matched the technology classifier.'
+      );
+    } catch (fallbackError) {
+      return sourceResult(source, started, 0, 0, [], 1,
+        'Careers Malawi could not be scanned via REST API or public page: ' +
+        (fallbackError instanceof Error ? fallbackError.message : String(apiError)), 'error');
+    }
   }
 }
-
 async function scanPublicPage(source: typeof OPPORTUNITY_SOURCES[number]): Promise<OpportunitySourceResult> {
   const started = Date.now();
   try {
