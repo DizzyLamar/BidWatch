@@ -56,6 +56,9 @@ type Tender = {
   submittedAt: string;
   notes?: string;
   submissionReference?: string;
+  submissionMethod?: string;
+  submissionReceiptUrl?: string;
+  submissionNotes?: string;
   appliedBy?: string;
   appliedAt?: string;
   revision?: number;
@@ -1304,6 +1307,9 @@ function TenderDrawer({
 }: any) {
   const [busy, setBusy] = useState(false);
   const [subRef, setSubRef] = useState(tender.submissionReference || '');
+  const [subMethod, setSubMethod] = useState(tender.submissionMethod || '');
+  const [subReceipt, setSubReceipt] = useState(tender.submissionReceiptUrl || '');
+  const [subNotes, setSubNotes] = useState(tender.submissionNotes || '');
   const [status, setStatus] = useState(tender.status);
   const [assignee, setAssignee] = useState(tender.assigneeId || '');
   const [revision, setRevision] = useState<number>(tender.revision || 1);
@@ -1331,6 +1337,9 @@ function TenderDrawer({
     try {
       await api.post(`/api/tenders/${tender.id}/apply`, {
         submissionReference: subRef,
+        submissionMethod: subMethod,
+        submissionReceiptUrl: subReceipt,
+        submissionNotes: subNotes,
         expectedRevision: revision,
       });
       invalidateApiCache(['/api/tenders', `/api/tenders/${tender.id}/`, '/api/kpis', '/api/history']);
@@ -1539,19 +1548,20 @@ function TenderDrawer({
             tender.status !== 'Applied' &&
             tender.status !== 'Declined' && (
               <section className="apply-box">
-                <h3>Mark as Applied</h3>
-                <p>Only authorised users can record the final submission.</p>
-                <input
-                  value={subRef}
-                  onChange={e => setSubRef(e.target.value)}
-                  placeholder="Submission reference (optional)"
-                />
+                <h3>Record submission</h3>
+                <p>Record enough evidence for another team member to verify that the bid was actually submitted.</p>
+                <div className="form-grid">
+                  <Field label="Submission method *"><select value={subMethod} onChange={e => setSubMethod(e.target.value)}><option value="">Select method</option><option>MANePS</option><option>Portal upload</option><option>Email</option><option>Physical submission</option><option>Courier</option><option>Other</option></select></Field>
+                  <Field label="Submission reference"><input value={subRef} onChange={e => setSubRef(e.target.value)} placeholder="Receipt / acknowledgement / reference" /></Field>
+                  <Field label="Receipt URL"><input value={subReceipt} onChange={e => setSubReceipt(e.target.value)} placeholder="https://…" /></Field>
+                  <Field label="Submission notes" wide><textarea rows={3} value={subNotes} onChange={e => setSubNotes(e.target.value)} placeholder="Confirmation details, recipient, timestamp, portal response…" /></Field>
+                </div>
                 <button
                   className="primary wide"
                   onClick={requestApply}
                   disabled={busy}
                 >
-                  <Check size={17} /> Confirm Applied
+                  <Check size={17} /> Confirm submission
                 </button>
               </section>
             )}
