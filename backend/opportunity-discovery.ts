@@ -5,6 +5,7 @@ export const OPPORTUNITY_SOURCES = [
   { id: 'ppda', name: 'PPDA procurement notices', url: 'https://ppda.mw/tenders', kind: 'public' as const },
   { id: 'malawi-gov', name: 'Malawi Government tenders', url: 'https://www.malawi.gov.mw/index.php/resources/publications/tenders', kind: 'public' as const },
   { id: 'careersmw', name: 'Careers Malawi tenders & bids', url: 'https://careersmw.com/tenders-and-non-consultancy-services/', kind: 'public' as const },
+  { id: 'careersmw-consultancies', name: 'Careers Malawi consultancies', url: 'https://careersmw.com/consultancies-tenders/', kind: 'public' as const },
 ] as const;
 
 export type RelevanceLevel = 'high' | 'medium' | 'low';
@@ -316,113 +317,196 @@ function sourceResult(source: typeof OPPORTUNITY_SOURCES[number], started: numbe
   };
 }
 
-async function scanCareersMalawi(): Promise<OpportunitySourceResult> {
-  const source = OPPORTUNITY_SOURCES.find(item => item.id === 'careersmw')!;
+async function scanCareersMalawiPage(
+  source: typeof OPPORTUNITY_SOURCES[number],
+): Promise<OpportunitySourceResult> {
   const started = Date.now();
 
-  // Prefer the WordPress REST API: it returns article content in batches and
-  // avoids hammering individual Careers Malawi detail pages (which can trigger
-  // rate limiting after a small number of requests).
+  // Careers Malawi protects individual article pages with a 403 in some
+  // environments. The category listing remains public and exposes stable
+  // numeric post IDs in the article URLs. Use those IDs with the WordPress
+  // REST API so we get the full article body without crawling protected
+  // detail pages.
   try {
-    const apiUrl = 'https://careersmw.com/wp-json/wp/v2/posts?per_page=100&orderby=date&order=desc&_fields=id,date,link,title,content';
-    const payload = await fetchJson(apiUrl);
-    const posts = Array.isArray(payload) ? payload as Array<Record<string, unknown>> : [];
+    const listingHtml = await fetchText(source.url);
+    const links = linkCandidates(listingHtml, source.url)
+      .filter(link => link.url.startsWith('https://careersmw.com/'))
+      .filter(link => !/\/page\/\d+\/?$|\/category\/|\/tag\//i.test(link.url));
+
+    const postIds = Array.from(new Set(
+      links
+        .map(link => link.url.match(/\/(\d+)(?:-\d+)?\/?$/)?.[1] || '')
+        .filter(Boolean),
+    ));
+
     const notices: Opportunity[] = [];
     let parsed = 0;
     let failed = 0;
 
-    for (const post of posts) {
-      try {
-        const titleObj = post.title && typeof post.title === 'object' ? post.title as Record<string, unknown> : {};
-        const contentObj = post.content && typeof post.content === 'object' ? post.content as Record<string, unknown> : {};
-        const title = decodeHtml(text(titleObj.rendered));
-        const articleText = decodeHtml(text(contentObj.rendered));
-        if (!title || !articleText) { failed += 1; continue; }
-        parsed += 1;
+    // WordPress accepts up to 100 IDs in one request. Batch defensively in
+    // case the listing grows beyond that.
+    for (let offset = 0; offset < postIds.length; offset += 100) {
+      const ids = postIds.slice(offset, offset + 100);
+      if (!ids.length) continue;
 
-        const candidate = {
-          title,
-          organisation: extractOrganisation(articleText),
-          reference: extractReference(articleText),
-          deadline: extractDeadline(articleText),
-          publishedAt: dateString(post.date),
-          description: articleText.slice(0, 12000),
-          noticeType: /request for (?:proposal|quotation|expression)|consultancy/i.test(articleText) ? 'Tender / consultancy' : 'Tender / bid',
-          url: firstString(post.link),
-        };
-        const notice = normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference), articleText);
-        if (notice) {
-          notice.details = {
-            publishedAt: dateString(candidate.publishedAt),
-            procurementMethod: /national competitive bidding|ncb/i.test(articleText) ? 'National Competitive Bidding' : ''
-          };
-          notices.push(notice);
+      try {
+        const apiUrl =
+          'https://careersmw.com/wp-json/wp/v2/posts?include=' +
+          encodeURIComponent(ids.join(',')) +
+          '&per_page=100&orderby=date&order=desc&_fields=id,date,link,title,content';
+        const payload = await fetchJson(apiUrl);
+        const posts = Array.isArray(payload)
+          ? payload as Array<Record<string, unknown>>
+          : [];
+
+        for (const post of posts) {
+          try {
+            const titleObj = post.title && typeof post.title === 'object'
+              ? post.title as Record<string, unknown> : {};
+            const contentObj = post.content && typeof post.content === 'object'
+              ? post.content as Record<string, unknown> : {};
+            const title = decodeHtml(text(titleObj.rendered));
+            const articleHtml = text(contentObj.rendered);
+            const articleText = decodeHtml(articleHtml);
+            if (!title || !articleText) {
+              failed += 1;
+              continue;
+            }
+            parsed += 1;
+
+            const candidate = {
+              title,
+              organisation: extractOrganisation(articleText),
+              reference: extractReference(articleText),
+              deadline: extractDeadline(articleText),
+              publishedAt: dateString(post.date),
+              description: articleText.slice(0, 12000),
+              noticeType: source.id === 'careersmw-consultancies'
+                ? 'Tender / consultancy'
+                : 'Tender / bid',
+              url: firstString(post.link),
+            };
+
+            const notice = normalizeCandidate(
+              candidate,
+              source.id,
+              source.name,
+              source.url,
+              text(candidate.reference) || text(post.id),
+              articleText,
+            );
+
+            if (notice) {
+              const documentLinks: Array<{ title: string; url: string }> = [];
+              const seenDocuments = new Set<string>();
+              for (const match of articleHtml.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)) {
+                const url = absoluteUrl(match[1], firstString(post.link) || source.url);
+                const linkTitle = decodeHtml(match[2]);
+                if (!url || !linkTitle || seenDocuments.has(url)) continue;
+                if (!/^https:\/\/careersmw\\.com\//i.test(url)) continue;
+                if (/download|document|attachment|pdf|docx?|xlsx?|tender|rfp|quotation|proposal/i.test(url + ' ' + linkTitle)) {
+                  seenDocuments.add(url);
+                  documentLinks.push({ title: linkTitle, url });
+                }
+              }
+
+              notice.details = {
+                publishedAt: dateString(candidate.publishedAt),
+                procurementMethod: /national competitive bidding|ncb/i.test(articleText)
+                  ? 'National Competitive Bidding'
+                  : /request for proposals|rfp/i.test(articleText)
+                    ? 'Request for Proposals'
+                    : /request for quotations|rfq/i.test(articleText)
+                      ? 'Request for Quotations'
+                      : '',
+                documents: documentLinks.slice(0, 20),
+              };
+              notices.push(notice);
+            }
+          } catch {
+            failed += 1;
+          }
         }
-      } catch { failed += 1; }
+      } catch {
+        // Keep the source visible as a successful listing fetch even if the
+        // REST API batch is temporarily unavailable; title-only candidates
+        // provide a degraded but useful discovery result.
+        for (const link of links.slice(offset, offset + 100)) {
+          try {
+            const title = text(link.title);
+            if (!title) continue;
+            const notice = normalizeCandidate(
+              {
+                title,
+                organisation: '',
+                reference: extractReference(title),
+                deadline: extractDeadline(title),
+                description: title,
+                noticeType: source.id === 'careersmw-consultancies'
+                  ? 'Tender / consultancy'
+                  : 'Tender / bid',
+                url: link.url,
+              },
+              source.id,
+              source.name,
+              source.url,
+              extractReference(title),
+              title,
+            );
+            if (notice) notices.push(notice);
+          } catch {
+            failed += 1;
+          }
+        }
+      }
     }
 
     const unique = new Map<string, Opportunity>();
-    for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
+    for (const item of notices) {
+      unique.set(
+        (item.reference + '|' + item.url + '|' + item.title).toLowerCase(),
+        item,
+      );
+    }
 
     return sourceResult(
       source,
       started,
-      posts.length,
-      parsed,
+      links.length,
+      parsed || links.length,
       Array.from(unique.values()).slice(0, 100),
       failed,
-      'Careers Malawi WordPress API returned ' + posts.length + ' posts; parsed ' + parsed + '; ' + unique.size + ' matched the technology classifier.'
+      'Careers Malawi ' +
+        (source.id === 'careersmw-consultancies' ? 'consultancies' : 'tenders') +
+        ' listing returned ' + links.length +
+        ' records; WordPress API parsed ' + parsed +
+        '; ' + unique.size +
+        ' matched the technology classifier.',
     );
-  } catch (apiError) {
-    // API failure is a source failure, not a reason to silently report zero
-    // procurement records. Fall back to the public listing page so the source
-    // remains discoverable when its REST API is temporarily unavailable.
-    try {
-      const html = await fetchText(source.url);
-      const links = linkCandidates(html, source.url)
-        .filter(link => link.url.startsWith('https://careersmw.com/'))
-        .filter(link => !/\/page\/\d+\/?$|\/category\/|\/tag\//i.test(link.url))
-        .slice(0, 40);
-
-      const notices: Opportunity[] = [];
-      let failed = 0;
-      let parsed = 0;
-
-      for (const link of links) {
-        try {
-          const detailHtml = await fetchText(link.url);
-          parsed += 1;
-          const articleText = decodeHtml(detailHtml);
-          const title = (detailHtml.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1]
-            || detailHtml.match(/<h1[^>]*>([\\s\\S]*?)<\/h1>/i)?.[1] || link.title);
-          const candidate = {
-            title: decodeHtml(title),
-            organisation: extractOrganisation(articleText),
-            reference: extractReference(articleText),
-            deadline: extractDeadline(articleText),
-            publishedAt: extractDate(articleText.match(/(?:publication|published|date of publication|date issued|issue date)[^.;]{0,100}/i)?.[0] || ''),
-            description: articleText.slice(0, 12000),
-            noticeType: /request for (?:proposal|quotation|expression)|consultancy/i.test(articleText) ? 'Tender / consultancy' : 'Tender / bid',
-            url: link.url,
-          };
-          const notice = normalizeCandidate(candidate, source.id, source.name, source.url, text(candidate.reference), articleText);
-          if (notice) notices.push(notice);
-        } catch { failed += 1; }
-      }
-
-      const unique = new Map<string, Opportunity>();
-      for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
-      return sourceResult(
-        source, started, links.length, parsed,
-        Array.from(unique.values()).slice(0, 80), failed,
-        'Careers Malawi REST API unavailable; fallback parsed ' + parsed + ' of ' + links.length + ' detail pages; ' + unique.size + ' matched the technology classifier.'
-      );
-    } catch (fallbackError) {
-      return sourceResult(source, started, 0, 0, [], 1,
-        'Careers Malawi could not be scanned via REST API or public page: ' +
-        (fallbackError instanceof Error ? fallbackError.message : String(apiError)), 'error');
-    }
+  } catch (error) {
+    return sourceResult(
+      source,
+      started,
+      0,
+      0,
+      [],
+      1,
+      'Careers Malawi ' +
+        (source.id === 'careersmw-consultancies' ? 'consultancies' : 'tenders') +
+        ' could not be scanned: ' +
+        (error instanceof Error ? error.message : String(error)),
+      'error',
+    );
   }
+}
+
+async function scanCareersMalawi(): Promise<OpportunitySourceResult[]> {
+  const tenderSource = OPPORTUNITY_SOURCES.find(item => item.id === 'careersmw')!;
+  const consultancySource = OPPORTUNITY_SOURCES.find(item => item.id === 'careersmw-consultancies')!;
+  return [
+    await scanCareersMalawiPage(tenderSource),
+    await scanCareersMalawiPage(consultancySource),
+  ];
 }
 async function scanPublicPage(source: typeof OPPORTUNITY_SOURCES[number]): Promise<OpportunitySourceResult> {
   const started = Date.now();
@@ -528,7 +612,10 @@ export async function discoverPlatformOpportunities() {
   const results: OpportunitySourceResult[] = [];
   for (const source of OPPORTUNITY_SOURCES) {
     if (source.id === 'maneps') results.push(await scanManeps());
-    else if (source.id === 'careersmw') results.push(await scanCareersMalawi());
+    else if (source.id === 'careersmw') {
+      const careersResults = await scanCareersMalawi();
+      results.push(...careersResults);
+    }
     else results.push(await scanPublicPage(source));
   }
   return results;
