@@ -338,6 +338,9 @@ async function scanCareersMalawiPage(
         .map(link => link.url.match(/\/(\d+)(?:-\d+)?\/?$/)?.[1] || '')
         .filter(Boolean),
     ));
+    const listingLinkByTitle = new Map(
+      links.map(link => [normalizeForMatch(link.title), link.url]),
+    );
 
     const notices: Opportunity[] = [];
     let parsed = 0;
@@ -384,7 +387,12 @@ async function scanCareersMalawiPage(
               noticeType: source.id === 'careersmw-consultancies'
                 ? 'Tender / consultancy'
                 : 'Tender / bid',
-              url: firstString(post.link),
+              // IMPORTANT: use the URL from the actual tender/consultancy
+              // category listing, not post.link from the generic WordPress API.
+              // Careers Malawi can reuse numeric WordPress IDs across content
+              // types; post.link has previously resolved to a job such as
+              // /215999/ even when the listing entry was a tender.
+              url: listingLinkByTitle.get(normalizeForMatch(title)) || '',
             };
 
             const notice = normalizeCandidate(
