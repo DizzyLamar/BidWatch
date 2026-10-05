@@ -446,7 +446,8 @@ export async function persistOpportunityUpdates(results: OpportunitySourceResult
   const byKey = new Map(existing.items.map(item => [updateKey(item), item]));
   const timestamp = new Date().toISOString();
   for (const result of results) {
-    await db.add('opportunity_source_runs', [{ ...result, scanType }]);
+    const { notices: _notices, ...sourceSummary } = result;
+    await db.add('opportunity_source_runs', [{ ...sourceSummary, scanType }]);
     for (const opportunity of result.notices) {
       const key = updateKey(opportunity); const current = byKey.get(key);
       if (current) {
