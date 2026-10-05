@@ -434,15 +434,18 @@ async function scanPublicPage(source: typeof OPPORTUNITY_SOURCES[number]): Promi
     const notices = normalized.filter((item): item is Opportunity => Boolean(item));
     const unique = new Map<string, Opportunity>();
     for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
+    // A candidate rejected by the classifier is still a successfully parsed
+    // procurement notice. "failedCount" is reserved for extraction/fetch
+    // failures, so source health does not report irrelevant notices as errors.
     return sourceResult(
       source,
       started,
       raw.length,
-      normalized.length,
+      raw.length,
       Array.from(unique.values()).slice(0, 100),
-      normalized.filter(item => !item).length,
+      0,
       raw.length
-        ? 'Fetched ' + raw.length + ' public records; parsed ' + normalized.length + '; ' + unique.size + ' matched the technology classifier.'
+        ? 'Fetched and parsed ' + raw.length + ' public records; ' + unique.size + ' matched the technology classifier.'
         : 'Source responded successfully but exposed no procurement records to the deterministic extractor.',
     );
   } catch (error) {
