@@ -274,7 +274,44 @@ export const handler = router({
   'GET /api/opportunities/watchlists': [requireAuth(), requirePermission('bids.view'), async ctx => { const u = await actor(ctx); const items = await listAll<Record<string, unknown>>('opportunity_watchlists'); return json({ watchlists: items.filter(x => x.userId === u.id).sort((a,b) => String(a.name).localeCompare(String(b.name))) }); }],
   'POST /api/opportunities/watchlists': [requireAuth(), requirePermission('bids.view'), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('Watchlist name is required.', 400); const filters = b.filters && typeof b.filters === 'object' ? b.filters : {}; const [id] = await db.add('opportunity_watchlists', [{ userId: u.id, name, filters, createdAt: now(), updatedAt: now() }]); if (!id) return error('Could not save watchlist.', 500); return json({ watchlist: await getById<Record<string, unknown>>('opportunity_watchlists', id) }, 201); }],
   'DELETE /api/opportunities/watchlists/:id': [requireAuth(), requirePermission('bids.view'), async ctx => { const u = await actor(ctx); const item = await getById<Record<string, unknown>>('opportunity_watchlists', ctx.params.id); if (!item || item.userId !== u.id) return error('Watchlist not found.', 404); await db.delete('opportunity_watchlists', [item.id]); return json({ ok: true }); }],
-  'GET /api/opportunities/source-health': [requireAuth(), requirePermission('bids.view'), async () => { const runs = await listAll<Record<string, unknown>>('opportunity_source_runs'); const latest = new Map<string, Record<string, unknown>>(); for (const run of runs.sort((a,b) => new Date(String(b.checkedAt || b.createdAt || 0)).getTime() - new Date(String(a.checkedAt || a.createdAt || 0)).getTime())) if (!latest.has(String(run.sourceId))) latest.set(String(run.sourceId), run); return json({ sources: DISCOVERY_SOURCES.map(source => ({ ...source, lastRun: latest.get(source.id) || null })) }); }],
+  'GET /api/opportunities/source-health': [requireAuth(), requirePermission('bids.view'), async () => {
+    const runs = await listAll<Record<string, unknown>>('opportunity_source_runs', 2000);
+    const latest = new Map<string, Record<string, unknown>>();
+    for (const run of runs.sort((a,b) => new Date(String(b.checkedAt || b.createdAt || 0)).getTime() - new Date(String(a.checkedAt || a.createdAt || 0)).getTime())) {
+      const sourceId = String(run.sourceId || '');
+      if (sourceId && !latest.has(sourceId)) latest.set(sourceId, run);
+    }
+    const nowMs = Date.now();
+    return json({
+      checkedAt: now(),
+      sources: DISCOVERY_SOURCES.map(source => {
+        const lastRun = latest.get(source.id) || null;
+        const checkedAt = lastRun ? new Date(String(lastRun.checkedAt || lastRun.createdAt || 0)).getTime() : 0;
+        const ageHours = checkedAt ? Math.max(0, Math.round(((nowMs - checkedAt) / 3600000) * 10) / 10) : null;
+        const status = !lastRun ? 'never-checked'
+          : String(lastRun.status) === 'error' ? 'failed'
+          : ageHours !== null && ageHours > 48 ? 'stale'
+          : Number(lastRun.fetchedCount || 0) === 0 ? 'success-empty'
+          : 'healthy';
+        return {
+          ...source,
+          health: status,
+          ageHours,
+          lastRun: lastRun ? {
+            id: lastRun.id,
+            status: lastRun.status,
+            checkedAt: lastRun.checkedAt,
+            fetchedCount: lastRun.fetchedCount,
+            parsedCount: lastRun.parsedCount,
+            relevantCount: lastRun.relevantCount,
+            failedCount: lastRun.failedCount,
+            durationMs: lastRun.durationMs,
+            message: lastRun.message,
+          } : null,
+        };
+      }),
+    });
+  }],
   'GET /api/opportunities/:id/changes': [requireAuth(), requirePermission('bids.view'), async ctx => { const opportunity = await getById<Record<string, unknown>>('opportunity_updates', ctx.params.id); if (!opportunity) return error('Opportunity not found.', 404); const changes = await listAll<Record<string, unknown>>('opportunity_changes'); return json({ changes: changes.filter(x => x.opportunityUpdateId === opportunity.id).sort((a,b) => new Date(String(b.detectedAt)).getTime() - new Date(String(a.detectedAt)).getTime()).slice(0, 50) }); }],
   'GET /api/opportunities/:id': [requireAuth(), requirePermission('bids.view'), async ctx => { const opportunity = await verifyOpportunity(ctx.params.id); if (!opportunity) return error('Opportunity not found.', 404); return json({ opportunity }); }],
   'POST /api/opportunities/scan': [requireAuth(), requirePermission('bids.view'), async ctx => { if (!rateLimit(`scan:${ctx.user!.userId}`, RATE_LIMITS.scan)) return error('Source scanning is temporarily rate-limited. Try again in a few minutes.', 429); const sources = await discoverPlatformOpportunities(); await persistOpportunityUpdates(sources); const persisted = await listOpportunityUpdates(120); const missingDeadlines = persisted.filter(item => !item.deadline && item.state !== 'dismissed').slice(0, 30); for (const item of missingDeadlines) await verifyOpportunity(item.id); return json({ scannedAt: now(), sources }); }],
