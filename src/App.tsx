@@ -29,6 +29,7 @@ const AdminPanel = lazy(() => import('./AdminPanel'));
 import { cachedGet, clearApiCache, invalidateApiCache } from './api-cache';
 import { applySeo } from './seo';
 import Opportunities from './Opportunities';
+import BidWorkspace from './BidWorkspace';
 
 type Role = 'Member' | 'Authorised' | 'Admin';
 type Status =
@@ -1489,6 +1490,7 @@ function TenderDrawer({
               {busy ? 'Saving…' : 'Save changes'}
             </button>
           </section>
+          <BidWorkspace tenderId={tender.id} revision={revision} users={users} canEdit={Boolean(profile.permissions?.includes('bids.edit'))} onRevision={setRevision} />
           <section>
             <div className="section-title">
               <h3>Attachments</h3>
