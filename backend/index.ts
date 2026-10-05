@@ -69,6 +69,15 @@ const MIME_BY_EXTENSION: Record<string, string[]> = {
   txt: ['text/plain'],
   zip: ['application/zip', 'application/x-zip-compressed']
 };
+function validCronSecret(ctx: RouterContext) {
+  const expected = process.env.CRON_SECRET || '';
+  const supplied = String(ctx.req.headers['x-cron-secret'] || '');
+  if (!expected || !supplied) return false;
+  const expectedBytes = Buffer.from(expected);
+  const suppliedBytes = Buffer.from(supplied);
+  return expectedBytes.length === suppliedBytes.length && require('node:crypto').timingSafeEqual(expectedBytes, suppliedBytes);
+}
+
 const REQUEST_LIMITS = new Map<string, { count: number; resetAt: number }>();
 const RATE_WINDOW_MS = 5 * 60 * 1000;
 const RATE_LIMITS = { upload: 20, scan: 2 };
@@ -275,6 +284,8 @@ export async function reminderHandler(_event: unknown) {
 }
 
 export const handler = router({
+  'POST /api/internal/reminders': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); return json(await reminderHandler(ctx)); }],
+  'POST /api/internal/opportunity-scan': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); return json(await procurementDiscoveryHandler(ctx)); }],
   'GET /api/me': [requireAuth(), async ctx => { const u = await currentUser(ctx); if (!u) return error('Your Google account is not provisioned for BidWatch.', 403); if (!u.active || u.status === 'Suspended') return error('Your BidWatch access is suspended.', 403); return json({ user: { ...u, role: u.role?.name || 'Member', onboardingCompleted: u.onboardingCompleted === true } }); }], 'PUT /api/me/profile': [requireAuth(), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('A display name is required.', 400); const next = { ...u, name, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ user: next }); }],
   'PUT /api/me/onboarding': [requireAuth(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
   'GET /api/config': [requireAuth(), requirePermission('bids.view'), async () => { const records = await listAll<{ name: string; active: boolean }>('categories'); return json({ categories: records.filter(x => x.active).map(x => x.name), categoryRecords: records, statuses: STATUSES }); }],
