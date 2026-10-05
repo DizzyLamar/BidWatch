@@ -363,10 +363,21 @@ async function scanPublicPage(source: typeof OPPORTUNITY_SOURCES[number]): Promi
     const html = await fetchText(source.url);
     if (html.length < 120) return sourceResult(source, started, 0, 0, [], 1, 'The public page did not expose enough procurement content for extraction.', 'error');
     const raw = publicCandidates(html, source);
-    const notices = raw.map(item => normalizeCandidate(item, source.id, source.name, source.url, text(item.reference), text(item.description))).filter((item): item is Opportunity => Boolean(item));
+    const normalized = raw.map(item => normalizeCandidate(item, source.id, source.name, source.url, text(item.reference), text(item.description)));
+    const notices = normalized.filter((item): item is Opportunity => Boolean(item));
     const unique = new Map<string, Opportunity>();
     for (const item of notices) unique.set((item.reference + '|' + item.url + '|' + item.title).toLowerCase(), item);
-    return sourceResult(source, started, raw.length, raw.length, Array.from(unique.values()).slice(0, 100), 0, 'Parsed ' + raw.length + ' public procurement records; ' + unique.size + ' matched the technology classifier.');
+    return sourceResult(
+      source,
+      started,
+      raw.length,
+      normalized.length,
+      Array.from(unique.values()).slice(0, 100),
+      normalized.filter(item => !item).length,
+      raw.length
+        ? 'Fetched ' + raw.length + ' public records; parsed ' + normalized.length + '; ' + unique.size + ' matched the technology classifier.'
+        : 'Source responded successfully but exposed no procurement records to the deterministic extractor.',
+    );
   } catch (error) {
     return sourceResult(source, started, 0, 0, [], 1, 'The public source could not be scanned: ' + (error instanceof Error ? error.message : 'unknown source error'), 'error');
   }
