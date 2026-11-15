@@ -49,9 +49,9 @@ read -rsp "Supabase database URL: " DATABASE_URL
 echo
 export DATABASE_URL
 
-supabase db dump --db-url "$DATABASE_URL" -f roles.sql --role-only
-supabase db dump --db-url "$DATABASE_URL" -f schema.sql
-supabase db dump --db-url "$DATABASE_URL" -f data.sql --use-copy --data-only
+supabase db dump --remote="$DATABASE_URL" -f roles.sql --role-only
+supabase db dump --remote="$DATABASE_URL" -f schema.sql
+supabase db dump --remote="$DATABASE_URL" -f data.sql --use-copy --data-only
 
 unset DATABASE_URL
 sha256sum roles.sql schema.sql data.sql > SHA256SUMS
