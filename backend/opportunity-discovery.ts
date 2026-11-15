@@ -407,11 +407,11 @@ async function scanCareersMalawiPage(
             if (notice) {
               const documentLinks: Array<{ title: string; url: string }> = [];
               const seenDocuments = new Set<string>();
-              for (const match of articleHtml.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)) {
+              for (const match of articleHtml.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
                 const url = absoluteUrl(match[1], firstString(post.link) || source.url);
                 const linkTitle = decodeHtml(match[2]);
                 if (!url || !linkTitle || seenDocuments.has(url)) continue;
-                if (!/^https:\/\/careersmw\\.com\//i.test(url)) continue;
+                if (!/^https:\/\/careersmw\.com\//i.test(url)) continue;
                 if (/download|document|attachment|pdf|docx?|xlsx?|tender|rfp|quotation|proposal/i.test(url + ' ' + linkTitle)) {
                   seenDocuments.add(url);
                   documentLinks.push({ title: linkTitle, url });
