@@ -91,7 +91,7 @@ public.app_records (
 Indexes observed:
 - Primary key on `id`.
 - `app_records_table_created_idx` on `(table_name, created_at)`.
-- `app_records_users_email_unique`, a partial unique index on lowercased user email for records where `table_name = 'users'`.
+- `app_records_users_email_unique`, a partial unique index on lowercased user email for records where `table_name = 'users'`. This is consistent with keeping provisioned user identity records platform-global; do not convert this collection into one duplicate user row per organisation.
 
 No organisation, membership or tenant ownership columns/tables currently exist in the application schema.
 
@@ -318,16 +318,21 @@ Seed the existing protected Super Admin account only after verifying the current
 
 ### 9.5 Transitional `app_records` ownership
 
-Add `organisation_id uuid` to `public.app_records` as an additive migration.
+Add explicit scope metadata to `public.app_records` as an additive migration:
+- `scope_type text not null`, constrained to `global` or `organisation`.
+- `organisation_id uuid null references organisations(id)`.
+- A check constraint requiring a null organisation ID for global records and a non-null organisation ID for organisation records.
+
+Do not force every record into an organisation. The existing `users` collection represents provisioned identity and remains platform-global. `opportunity_source_runs` represents shared platform scan telemetry and also remains global. The remaining existing collections are assigned to the legacy organisation in Phase 1. The existing user's role and permissions are migrated into the organisation membership/role model; the legacy fields may remain temporarily for rollback compatibility but must no longer be authoritative for organisation access.
 
 Migration sequence:
 1. Create the default legacy organisation.
-2. Create the existing user's organisation membership and role mapping.
-3. Add nullable `app_records.organisation_id`.
-4. Backfill every existing application row to the default organisation.
-5. Verify zero unassigned rows and verify counts by `table_name`.
-6. Add the foreign key and index `(organisation_id, table_name, created_at)`.
-7. Make `organisation_id` NOT NULL only after verification.
+2. Create the deduplicated organisation roles and the existing user's organisation membership.
+3. Add `scope_type` and nullable `organisation_id` to `app_records`.
+4. Mark `users` and `opportunity_source_runs` as global with null organisation IDs.
+5. Backfill all other existing application rows to the default organisation.
+6. Verify the exact 113-row inventory, per-collection counts, scope assignment and foreign-key validity.
+7. Add the foreign key, check constraint and index `(scope_type, organisation_id, table_name, created_at)`.
 8. Keep the generic table as a compatibility store during later domain migrations; do not attempt a wholesale JSONB-to-relational rewrite in Phase 1.
 
 The default organisation should be clearly labelled as the legacy BidWatch workspace and remain renameable by its owner. Confirm its display name before running the production data migration.
@@ -366,13 +371,14 @@ await tenantDb.delete('tenders', ids);
 ```
 
 The exact API may differ, but the following rules are mandatory:
-- Tenant scope is required, never optional for organisation-owned collections.
-- Reads filter by both `organisation_id` and `table_name`.
-- Updates and deletes filter by `organisation_id`, `table_name` and record ID.
-- Inserts set `organisation_id` server-side.
+- Every repository operation declares either an organisation scope or an explicit platform-global scope.
+- Organisation reads filter by `scope_type = 'organisation'`, `organisation_id` and `table_name`.
+- Organisation updates and deletes filter by `scope_type`, `organisation_id`, `table_name` and record ID.
+- Organisation inserts set `scope_type` and `organisation_id` server-side.
+- Global reads/writes use a separate explicit platform-scoped repository method; they must never be available through an omitted tenant argument.
 - No helper may fall back to an unscoped query.
 - Internal scheduled jobs must declare their platform scope explicitly; global discovery must not inherit an arbitrary end-user organisation.
-- Add tests that prove missing tenant context fails closed.
+- Add tests that prove missing or ambiguous scope fails closed.
 
 A service-role Supabase client bypasses RLS. The repository's explicit tenant predicates and membership checks are therefore security-critical.
 
@@ -400,14 +406,14 @@ For future tenant files:
 
 | Existing collection | Phase 1 treatment |
 |---|---|
-| `users` | Map Auth user to organisation membership; keep compatibility record temporarily |
+| `users` | Keep as a platform-global provisioned identity/profile record; migrate its role and permissions into the organisation membership/role model; retain legacy role fields only for rollback during transition |
 | `roles` | Map existing roles to deduplicated organisation roles; preserve protected platform admin separately |
 | `categories` | Keep existing categories under the legacy organisation for now |
 | `tenders` | Assign to legacy organisation |
 | `bid_history` | Assign to legacy organisation |
 | `activity` | Assign to legacy organisation |
 | `opportunity_updates` | Assign to legacy organisation in Phase 1; shared canonical discovery is Phase 2 |
-| `opportunity_source_runs` | Keep platform scan ownership explicit; do not incorrectly treat source-run telemetry as a user-owned pursuit |
+| `opportunity_source_runs` | Keep platform-global as shared source scan telemetry; access only through explicit platform-scoped repository operations |
 | `attachments` | Add tenant ownership before the first record is created |
 | `bid_requirements` | Add tenant ownership before the first record is created |
 | `bid_tasks` | Add tenant ownership before the first record is created |
