@@ -304,7 +304,8 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       const { data: profileRow, error: profileLookupError } = await admin.from('app_records')
         .select('id,record').eq('table_name', 'users').contains('record', { email: invitedEmail }).single();
       assert.ifError(profileLookupError);
-      assert.ok(profileRow?.record?.userId);
+      assert.ok(profileRow);
+      assert.ok(profileRow.record?.userId);
       profileIds.push(profileRow.id);
       const invitedUserId = String(profileRow.record.userId);
       const { data: invitedIdentity, error: invitedIdentityError } = await admin.auth.admin.getUserById(invitedUserId);
