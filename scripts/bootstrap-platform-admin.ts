@@ -39,6 +39,13 @@ export async function bootstrapFirstPlatformAdmin(admin: any, userId: string) {
     throw new Error('The specified Auth identity does not exist.');
   }
 
+  const { data: existing, error: existingError } = await admin
+    .from('platform_admins')
+    .select('user_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (existingError) throw new Error(`Could not inspect platform administrator state: ${existingError.message}`);
+
   const { error: insertError } = await admin
     .from('platform_admins')
     .upsert({ user_id: userId, created_by: userId }, { onConflict: 'user_id', ignoreDuplicates: true });
@@ -51,7 +58,7 @@ export async function bootstrapFirstPlatformAdmin(admin: any, userId: string) {
     .maybeSingle();
   if (readError) throw new Error(`Could not verify platform administrator: ${readError.message}`);
   if (row?.user_id !== userId) throw new Error('Platform administrator provisioning could not be verified.');
-  return { userId, alreadyProvisioned: false };
+  return { userId, alreadyProvisioned: Boolean(existing) };
 }
 
 async function main() {
