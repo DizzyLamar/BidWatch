@@ -64,7 +64,7 @@ if (!runtime.includes('A verified database scope is required')) failures.push('U
 if (!runtime.includes("eq('scope_type', 'global').is('organisation_id', null)")) failures.push('Global records are not explicitly filtered.');
 if (!runtime.includes('scope_type: GLOBAL_COLLECTIONS.has(table) ? \'global\' : \'organisation\'')) failures.push('New app records are not assigned an explicit scope.');
 
-const routeLines = backend.split('\\n').filter(line => /^\\s*['"](GET|POST|PUT|DELETE) /.test(line));
+const routeLines = backend.split('\n').filter(line => /^\s*['"](GET|POST|PUT|DELETE) /.test(line));
 for (const line of routeLines) {
   if (line.includes('requireAuth()') && !line.includes('requireOrganisation()')) {
     failures.push('An authenticated API route is missing organisation membership middleware.');
