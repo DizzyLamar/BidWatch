@@ -343,6 +343,14 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       assert.ifError(acceptedMembershipError);
       assert.ok(acceptedMembership);
       assert.equal(acceptedMembership.status, 'active');
+
+      const memberListResponse = await apiRequest(userA, orgA, '/api/admin/users');
+      assert.equal(memberListResponse.status, 200, await memberListResponse.text());
+      const memberListBody = await memberListResponse.json() as { users: Array<{ id: string; membershipId: string; userId: string }> };
+      const listedInvitee = memberListBody.users.find(member => member.userId === invitedUserId);
+      assert.ok(listedInvitee);
+      assert.equal(listedInvitee.id, profileRow.id, 'the API must preserve the global profile ID used by bid assignments');
+      assert.equal(listedInvitee.membershipId, membership.id, 'member administration must expose the organisation membership ID separately');
       await anon.auth.signOut();
 
       const { data: observerRole, error: observerRoleError } = await admin.from('organisation_roles')
