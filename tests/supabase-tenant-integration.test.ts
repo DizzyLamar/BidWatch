@@ -8,7 +8,6 @@ import type { DatabaseScope } from '../backend/scoped-records';
 const supabaseUrl = process.env.SUPABASE_URL;
 const anonKey = process.env.SUPABASE_ANON_KEY;
 const serviceKey = process.env.SUPABASE_SECRET_KEY;
-const enabled = Boolean(supabaseUrl && anonKey && serviceKey);
 
 type Context = {
   body: unknown;
@@ -30,7 +29,8 @@ type Context = {
   res: Response;
 };
 
-test('local Supabase Auth and PostgREST enforce real organisation boundaries', { skip: !enabled }, async t => {
+test('local Supabase Auth and PostgREST enforce real organisation boundaries', async t => {
+  assert.ok(supabaseUrl && anonKey && serviceKey, 'Export SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SECRET_KEY from the local Supabase CLI before running integration tests.');
   const configuredHost = new URL(supabaseUrl!).hostname;
   assert.ok(
     configuredHost === '127.0.0.1' || configuredHost === 'localhost' || configuredHost === '::1',
