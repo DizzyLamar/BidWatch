@@ -79,6 +79,7 @@ jobs:
           export BROWSER_TEST_PORT=4173
           npm run build
           npm run test:integration
+          npx tsx scripts/migrate-legacy-attachments.ts
           npm run test:browser
 
       - name: Stop local Supabase
