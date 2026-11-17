@@ -284,7 +284,7 @@ export default function App() {
           const adminUsers = await cachedGet('/api/admin/users', 30000);
           setUsers(adminUsers.data.users);
         }
-        if (me.data.user.permissions?.includes('roles.view')) {
+        if (me.data.user.permissions?.includes('roles.view') || me.data.user.permissions?.includes('users.manage')) {
           const access = (await cachedGet('/api/admin/roles', 30000)).data;
           setRoles(access.roles);
           setPermissionMeta(access.permissions);
