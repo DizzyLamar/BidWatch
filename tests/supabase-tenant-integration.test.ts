@@ -667,6 +667,91 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       assert.equal(count, 1, 'only one notification record should exist');
     });
 
+    await t.test('scheduled reminders fan out to each organisation and only its assigned active member', async () => {
+      const dueAt = new Date(Date.now() + 14 * 86400000).toISOString();
+      for (const [tenderId, assigneeId] of [[tenderA, profileIds[0]], [tenderB, profileIds[1]]] as const) {
+        const { data: current, error: readError } = await admin.from('app_records')
+          .select('record').eq('id', tenderId).single();
+        assert.ifError(readError);
+        const { error: updateError } = await admin.from('app_records').update({
+          record: { ...current.record, deadline: dueAt, status: 'New', assigneeId },
+        }).eq('id', tenderId);
+        assert.ifError(updateError);
+      }
+
+      const scheduled = await import('../backend/index');
+      const result = await scheduled.reminderHandler(undefined);
+      assert.equal(result.statusCode, 200);
+      assert.equal(result.organisationsFailed, 0);
+      assert.ok(result.organisationsProcessed >= 2);
+      assert.ok(result.notificationsCreated >= 2);
+
+      const { data: notesA, error: notesAError } = await admin.from('app_records')
+        .select('record').eq('table_name', 'notifications').eq('scope_type', 'organisation')
+        .eq('organisation_id', orgA);
+      assert.ifError(notesAError);
+      const { data: notesB, error: notesBError } = await admin.from('app_records')
+        .select('record').eq('table_name', 'notifications').eq('scope_type', 'organisation')
+        .eq('organisation_id', orgB);
+      assert.ifError(notesBError);
+
+      const reminderA = (notesA || []).filter(row => row.record.kind === 'deadline-14' && row.record.tenderId === tenderA);
+      const reminderB = (notesB || []).filter(row => row.record.kind === 'deadline-14' && row.record.tenderId === tenderB);
+      assert.equal(reminderA.length, 1);
+      assert.equal(reminderA[0].record.userId, userA);
+      assert.equal(reminderB.length, 1);
+      assert.equal(reminderB[0].record.userId, userB);
+      assert.ok(!(notesA || []).some(row => row.record.tenderId === tenderB));
+      assert.ok(!(notesB || []).some(row => row.record.tenderId === tenderA));
+    });
+
+    await t.test('scheduled discovery scans sources once and persists tenant-owned copies', async () => {
+      const scheduled = await import('../backend/index');
+      const originalFetch = globalThis.fetch;
+      const html = '<html><table><tr><td>Provision of cybersecurity monitoring services</td><td>Malawi Test Authority</td><td>BW-SCHEDULED-001</td><td>Closing date: 2099-12-31</td></tr></table></html>';
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.startsWith('https://maneps.mw/')) {
+          return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (/^https:\/\/(ppda\.mw|www\.malawi\.gov\.mw|careersmw\.com)\//.test(url)) {
+          return new Response(html, { status: 200, headers: { 'content-type': 'text/html' } });
+        }
+        return originalFetch(input, init);
+      }) as typeof fetch;
+
+      try {
+        const { count: before, error: beforeError } = await admin.from('app_records')
+          .select('id', { count: 'exact', head: true }).eq('table_name', 'opportunity_source_runs')
+          .eq('scope_type', 'global');
+        assert.ifError(beforeError);
+
+        const result = await scheduled.procurementDiscoveryHandler(undefined);
+        assert.equal(result.statusCode, 200);
+        assert.ok(result.organisationsProcessed >= 2);
+        assert.equal(result.organisationsFailed, 0);
+        assert.ok(result.sources.length > 0);
+
+        const { count: after, error: afterError } = await admin.from('app_records')
+          .select('id', { count: 'exact', head: true }).eq('table_name', 'opportunity_source_runs')
+          .eq('scope_type', 'global');
+        assert.ifError(afterError);
+        assert.equal((after || 0) - (before || 0), result.sources.length,
+          'source telemetry is recorded once per source scan, not once per tenant');
+
+        for (const organisationId of [orgA, orgB]) {
+          const { data, error: updatesError } = await admin.from('app_records')
+            .select('record').eq('table_name', 'opportunity_updates')
+            .eq('scope_type', 'organisation').eq('organisation_id', organisationId);
+          assert.ifError(updatesError);
+          assert.ok((data || []).some(row => row.record.reference === 'BW-SCHEDULED-001'),
+            'each active organisation must receive the shared discovery observation in its own scope');
+        }
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     await t.test('attachment upload, signed URL, cross-tenant denial and deletion work end to end', async () => {
       const fileText = 'BidWatch tenant storage integration proof';
       const content = Buffer.from(fileText, 'utf8').toString('base64');

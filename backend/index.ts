@@ -4,6 +4,7 @@ import { requireOrganisation } from './tenancy';
 import { storageService } from './storage';
 import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES } from './opportunity-discovery';
 import { verifyOpportunity } from './opportunity-verification';
+import { runOrganisationTasks } from './scheduled-jobs';
 
 const now = () => new Date().toISOString();
 
@@ -360,28 +361,19 @@ async function listActiveOrganisations() {
 export async function procurementDiscoveryHandler(_event: unknown) {
   const organisations = await listActiveOrganisations();
   const sources = await discoverPlatformOpportunities();
-  const failures: Array<{ organisationId: string; error: string }> = [];
-  let processed = 0;
-
   // Fetch each public source once, then persist the same observation snapshot
   // independently inside every active organisation's database scope.
-  for (const organisation of organisations) {
-    try {
-      await withDatabaseScope({
-        kind: 'organisation',
-        organisationId: organisation.id,
-        legacyStorage: organisation.slug === 'legacy-bidwatch-workspace',
-      }, async () => {
-        await persistOpportunityUpdates(sources, 'scheduled', { recordSourceRuns: false });
-      });
-      processed += 1;
-    } catch (err) {
-      failures.push({
-        organisationId: organisation.id,
-        error: err instanceof Error ? err.message : 'Discovery persistence failed.',
-      });
-    }
-  }
+  const outcome = await runOrganisationTasks(organisations, async organisation => {
+    await withDatabaseScope({
+      kind: 'organisation',
+      organisationId: organisation.id,
+      legacyStorage: organisation.slug === 'legacy-bidwatch-workspace',
+    }, async () => {
+      await persistOpportunityUpdates(sources, 'scheduled', { recordSourceRuns: false });
+    });
+  });
+  const processed = outcome.processed.length;
+  const failures = outcome.failures;
 
   // Source-run telemetry is deliberately global and recorded once per scan,
   // not once for every tenant receiving the discovered opportunities.
@@ -404,73 +396,62 @@ export async function procurementDiscoveryHandler(_event: unknown) {
 
 export async function reminderHandler(_event: unknown) {
   const organisations = await listActiveOrganisations();
-  const failures: Array<{ organisationId: string; error: string }> = [];
-  let notificationsCreated = 0;
-  let organisationsProcessed = 0;
+  const outcome = await runOrganisationTasks(organisations, async organisation => {
+    const { data: memberships, error: membershipError } = await supabaseAdmin!
+      .from('organisation_members').select('user_id')
+      .eq('organisation_id', organisation.id).eq('status', 'active');
+    if (membershipError) throw new Error(membershipError.message);
+    const activeUserIds = new Set((memberships || []).map(member => member.user_id));
 
-  for (const organisation of organisations) {
-    try {
-      const { data: memberships, error: membershipError } = await supabaseAdmin!
-        .from('organisation_members').select('user_id')
-        .eq('organisation_id', organisation.id).eq('status', 'active');
-      if (membershipError) throw new Error(membershipError.message);
-      const activeUserIds = new Set((memberships || []).map(member => member.user_id));
+    return withDatabaseScope({
+      kind: 'organisation',
+      organisationId: organisation.id,
+      legacyStorage: organisation.slug === 'legacy-bidwatch-workspace',
+    }, async () => {
+      const tenders = await listAll<Tender>('tenders');
+      const users = (await listAll<User>('users'))
+        .filter(user => Boolean(user.userId && activeUserIds.has(user.userId)));
+      let count = 0;
 
-      const created = await withDatabaseScope({
-        kind: 'organisation',
-        organisationId: organisation.id,
-        legacyStorage: organisation.slug === 'legacy-bidwatch-workspace',
-      }, async () => {
-        const tenders = await listAll<Tender>('tenders');
-        const users = (await listAll<User>('users'))
-          .filter(user => Boolean(user.userId && activeUserIds.has(user.userId)));
-        let count = 0;
+      for (const tender of tenders) {
+        if (['Applied', 'Declined'].includes(tender.status)) continue;
+        const diff = new Date(tender.deadline).getTime() - Date.now();
+        const days = Math.ceil(diff / 86400000);
+        if (diff >= 0 && ![14, 7, 3, 1, 0].includes(days)) continue;
+        const kind = `deadline-${days}`;
+        const targets = tender.assigneeId
+          ? users.filter(user => user.id === tender.assigneeId)
+          : users;
 
-        for (const tender of tenders) {
-          if (['Applied', 'Declined'].includes(tender.status)) continue;
-          const diff = new Date(tender.deadline).getTime() - Date.now();
-          const days = Math.ceil(diff / 86400000);
-          if (diff >= 0 && ![14, 7, 3, 1, 0].includes(days)) continue;
-          const kind = `deadline-${days}`;
-          const targets = tender.assigneeId
-            ? users.filter(user => user.id === tender.assigneeId)
-            : users;
-
-          for (const user of targets) {
-            if (!user.userId) continue;
-            const notification = {
-              userId: user.userId,
-              tenderId: tender.id,
-              kind,
-              title: diff < 0 ? 'Bid overdue' : days === 0 ? 'Bid due today' : `Bid due in ${days} days`,
-              body: `${tender.title} for ${tender.organisation} is ${diff < 0 ? 'past its deadline' : 'approaching its deadline'}.`,
-              read: false,
-              createdAt: now(),
-            };
-            const inserted = await supabaseAdmin!.rpc('create_notification_once', {
-              p_organisation_id: organisation.id,
-              p_record: notification,
-            });
-            if (inserted.error) throw new Error(inserted.error.message);
-            if (inserted.data === true) count += 1;
-          }
+        for (const user of targets) {
+          if (!user.userId) continue;
+          const notification = {
+            userId: user.userId,
+            tenderId: tender.id,
+            kind,
+            title: diff < 0 ? 'Bid overdue' : days === 0 ? 'Bid due today' : `Bid due in ${days} days`,
+            body: `${tender.title} for ${tender.organisation} is ${diff < 0 ? 'past its deadline' : 'approaching its deadline'}.`,
+            read: false,
+            createdAt: now(),
+          };
+          const inserted = await supabaseAdmin!.rpc('create_notification_once', {
+            p_organisation_id: organisation.id,
+            p_record: notification,
+          });
+          if (inserted.error) throw new Error(inserted.error.message);
+          if (inserted.data === true) count += 1;
         }
-        return count;
-      });
-
-      notificationsCreated += created;
-      organisationsProcessed += 1;
-    } catch (err) {
-      failures.push({
-        organisationId: organisation.id,
-        error: err instanceof Error ? err.message : 'Reminder generation failed.',
-      });
-    }
-  }
+      }
+      return count;
+    });
+  });
+  const notificationsCreated = outcome.processed.reduce((total, item) => total + item.result, 0);
+  const failures = outcome.failures;
 
   return {
-    statusCode: failures.length ? 207 : 200,
-    organisationsProcessed,
+    // Partial work must be retryable by the scheduler; HTTP 207 is still 2xx.
+    statusCode: failures.length ? 500 : 200,
+    organisationsProcessed: outcome.processed.length,
     organisationsFailed: failures.length,
     notificationsCreated,
     failures,

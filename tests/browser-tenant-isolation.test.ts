@@ -258,3 +258,166 @@ test('browser workspace switching isolates two users and rejects a forged tenant
     if (userB?.id) await admin.auth.admin.deleteUser(userB.id);
   }
 });
+
+test('browser member administration enforces role changes, suspension, removal and admin boundaries', { timeout: 120000 }, async () => {
+  const suffix = randomUUID().replace(/-/g, '').slice(0, 12);
+  const ownerEmail = 'browser-owner-' + suffix + '@example.test';
+  const memberEmail = 'browser-member-' + suffix + '@example.test';
+  const password = 'BidWatch-' + randomUUID() + '!';
+  let owner: any;
+  let member: any;
+  let organisationId = '';
+  let browser: Browser | undefined;
+  let server: ChildProcess | undefined;
+
+  const createTestIdentity = async (email: string, name: string) => {
+    const { data, error } = await admin.auth.admin.createUser({
+      email, password, email_confirm: true, user_metadata: { full_name: name },
+    });
+    if (error || !data.user) throw error || new Error('Could not create browser lifecycle identity.');
+    return data.user;
+  };
+  const signInTestIdentity = async (email: string) => {
+    const client = createClient(supabaseUrl, anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+    });
+    const { data, error } = await client.auth.signInWithPassword({ email, password });
+    if (error || !data.session) throw error || new Error('Could not sign in browser lifecycle identity.');
+    return data.session;
+  };
+
+  try {
+    owner = await createTestIdentity(ownerEmail, 'Lifecycle Owner');
+    member = await createTestIdentity(memberEmail, 'Lifecycle Member');
+    organisationId = await createOrganisation('Lifecycle Workspace ' + suffix, 'lifecycle-' + suffix, owner.id);
+
+    const ownerRole = await createRole(organisationId, 'owner', [
+      'bids.view', 'users.view', 'users.manage', 'roles.view', 'roles.manage',
+    ]);
+    const memberRole = await createRole(organisationId, 'member', ['bids.view']);
+    const analystRole = await createRole(organisationId, 'analyst', ['bids.view', 'notifications.view']);
+    await addMembership(organisationId, owner.id, ownerRole);
+    await addMembership(organisationId, member.id, memberRole);
+    for (const identity of [
+      { user: owner, email: ownerEmail, name: 'Lifecycle Owner', roleId: ownerRole },
+      { user: member, email: memberEmail, name: 'Lifecycle Member', roleId: memberRole },
+    ]) {
+      const { error } = await admin.from('app_records').insert({
+        table_name: 'users',
+        record: {
+          userId: identity.user.id, email: identity.email, name: identity.name,
+          roleId: identity.roleId, active: true, status: 'Active',
+          onboardingCompleted: true, createdAt: new Date().toISOString(),
+        },
+        scope_type: 'global', organisation_id: null,
+      });
+      if (error) throw error;
+    }
+
+    server = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
+      cwd: process.cwd(),
+      env: { ...process.env, PORT: String(port), SUPABASE_URL: supabaseUrl, SUPABASE_SECRET_KEY: serviceKey },
+      stdio: 'ignore',
+    });
+    await waitForServer(server);
+    browser = await chromium.launch({ headless: true });
+
+    const ownerSession = await signInTestIdentity(ownerEmail);
+    const ownerContext = await browser.newContext();
+    const storageKey = 'sb-' + new URL(supabaseUrl).hostname.split('.')[0] + '-auth-token';
+    await ownerContext.addInitScript(({ key, session }) => localStorage.setItem(key, JSON.stringify(session)), {
+      key: storageKey, session: ownerSession,
+    });
+    const ownerPage = await ownerContext.newPage();
+    await ownerPage.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await ownerPage.locator('#active-organisation').waitFor({ state: 'visible' });
+    await ownerPage.locator('#active-organisation').selectOption(organisationId);
+    await ownerPage.getByRole('button', { name: 'Continue' }).click();
+    await ownerPage.locator('.app-shell').waitFor({ state: 'visible' });
+
+    const memberSession = await signInTestIdentity(memberEmail);
+    const memberContext = await browser.newContext();
+    await memberContext.addInitScript(({ key, session }) => localStorage.setItem(key, JSON.stringify(session)), {
+      key: storageKey, session: memberSession,
+    });
+    const memberPage = await memberContext.newPage();
+    await memberPage.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await memberPage.locator('#active-organisation').waitFor({ state: 'visible' });
+    await memberPage.locator('#active-organisation').selectOption(organisationId);
+    await memberPage.getByRole('button', { name: 'Continue' }).click();
+    await memberPage.locator('.app-shell').waitFor({ state: 'visible' });
+
+    const request = async (page: Page, token: string, path: string, method = 'GET', body?: unknown) =>
+      page.evaluate(async args => {
+        const response = await fetch(args.path, {
+          method: args.method,
+          headers: {
+            Authorization: 'Bearer ' + args.token,
+            'X-Organisation-Id': args.organisationId,
+            ...(args.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          },
+          ...(args.body === undefined ? {} : { body: JSON.stringify(args.body) }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        return { status: response.status, payload };
+      }, { path, method, token, body, organisationId });
+
+    const memberToken = memberSession.access_token;
+    const deniedMemberList = await request(memberPage, memberToken, '/api/admin/users');
+    assert.equal(deniedMemberList.status, 403, 'ordinary members cannot enumerate administrative membership data');
+    const deniedRoleWrite = await request(memberPage, memberToken, '/api/admin/roles', 'POST', {
+      name: 'Forged Admin Role', permissions: ['users.manage'],
+    });
+    assert.equal(deniedRoleWrite.status, 403, 'ordinary members cannot create or grant administrative roles');
+
+    const listed = await request(ownerPage, ownerSession.access_token, '/api/admin/users');
+    assert.equal(listed.status, 200);
+    const memberEntry = (listed.payload.users || []).find((item: any) => item.userId === member.id);
+    assert.ok(memberEntry?.membershipId, 'admin API must expose the membership id used by lifecycle routes');
+
+    const changedRole = await request(ownerPage, ownerSession.access_token,
+      '/api/admin/users/' + memberEntry.membershipId, 'PUT', { roleId: analystRole });
+    assert.equal(changedRole.status, 200);
+    assert.equal(changedRole.payload.roleId, analystRole);
+
+    const suspended = await request(ownerPage, ownerSession.access_token,
+      '/api/admin/users/' + memberEntry.membershipId, 'PUT', { status: 'suspended' });
+    assert.equal(suspended.status, 200);
+    const suspendedAccess = await request(memberPage, memberToken, '/api/tenders');
+    assert.equal(suspendedAccess.status, 403, 'suspended memberships must lose tenant API access immediately');
+
+    const reactivated = await request(ownerPage, ownerSession.access_token,
+      '/api/admin/users/' + memberEntry.membershipId, 'PUT', { status: 'active' });
+    assert.equal(reactivated.status, 200);
+    const restoredAccess = await request(memberPage, memberToken, '/api/tenders');
+    assert.equal(restoredAccess.status, 200, 'reactivation restores the member access path');
+
+    const removed = await request(ownerPage, ownerSession.access_token,
+      '/api/admin/users/' + memberEntry.membershipId, 'DELETE');
+    assert.equal(removed.status, 200);
+    const removedAccess = await request(memberPage, memberToken, '/api/tenders');
+    assert.equal(removedAccess.status, 403, 'soft removal must revoke access without deleting the Auth identity');
+    const organisations = await request(memberPage, memberToken, '/api/organisations');
+    assert.ok(!(organisations.payload.organisations || []).some((item: any) => item.id === organisationId));
+
+    await memberContext.close();
+    await ownerContext.close();
+  } finally {
+    await browser?.close();
+    if (server && server.exitCode === null) {
+      server.kill('SIGTERM');
+      await new Promise<void>(resolve => {
+        const timeout = setTimeout(resolve, 5000);
+        server!.once('exit', () => { clearTimeout(timeout); resolve(); });
+      });
+    }
+    if (organisationId) {
+      await admin.from('app_records').delete().eq('organisation_id', organisationId);
+      await admin.from('app_records').delete().eq('scope_type', 'global')
+        .in('record->>email', [ownerEmail, memberEmail]);
+      await admin.from('organisations').delete().eq('id', organisationId);
+    }
+    if (owner?.id) await admin.auth.admin.deleteUser(owner.id);
+    if (member?.id) await admin.auth.admin.deleteUser(member.id);
+  }
+});
