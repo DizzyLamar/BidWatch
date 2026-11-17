@@ -72,7 +72,7 @@ class MemoryQuery {
       return { data: matches.map(row => ({ id: row.id })), error: null };
     }
     const removed = new Set(matches.map(row => row.id));
-    this.rows = this.rows.filter(row => !removed.has(row.id));
+    this.rows.splice(0, this.rows.length, ...this.rows.filter(row => !removed.has(row.id)));
     return { data: matches.map(row => ({ id: row.id })), error: null };
   }
 
