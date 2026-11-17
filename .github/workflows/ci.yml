@@ -56,6 +56,9 @@ jobs:
         run: npm ci
 
       - name: Start local Supabase (Auth, PostgREST, Database and Storage)
+        env:
+          # GitHub-hosted runners may already have a PostgreSQL listener on the CLI default.
+          SUPABASE_DB_PORT: 55432
         run: npx supabase start --exclude realtime,imgproxy,studio,edge-runtime,analytics,vector,supavisor
 
       - name: Run real Auth and PostgREST integration tests
