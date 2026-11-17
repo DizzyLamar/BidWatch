@@ -18,6 +18,7 @@ const backend = read('backend/index.ts');
 const css = read('src/index.css');
 const tenancy = read('backend/tenancy.ts');
 const runtime = read('backend/runtime.ts');
+const scopedRecords = read('backend/scoped-records.ts');
 const uiCss = read('src/ui-system.css');
 
 for (const [pattern, description] of [
