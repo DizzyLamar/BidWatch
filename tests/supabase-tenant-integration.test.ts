@@ -714,14 +714,9 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       const { error } = await admin.from('app_records').delete().in('id', profileIds);
       if (error) throw error;
     }
-    if (membershipIds.length) {
-      const { error } = await admin.from('organisation_members').delete().in('id', membershipIds);
-      if (error) throw error;
-    }
-    if (roleIds.length) {
-      const { error } = await admin.from('organisation_roles').delete().in('id', roleIds);
-      if (error) throw error;
-    }
+    // Delete the test organisations as the owning resource. PostgreSQL
+    // cascades their memberships and roles; deleting final owners directly
+    // would correctly be rejected by the last-owner protection trigger.
     if (organisationIds.length) {
       const { error } = await admin.from('organisations').delete().in('id', organisationIds);
       if (error) throw error;
