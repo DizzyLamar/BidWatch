@@ -87,6 +87,10 @@ export function requireAuth() {
 
 const databaseScopeStorage = new AsyncLocalStorage<{ scope: DatabaseScope | null }>();
 
+export function withDatabaseScope<T>(scope: DatabaseScope, callback: () => Promise<T>): Promise<T> {
+  return databaseScopeStorage.run({ scope }, callback);
+}
+
 export function setDatabaseScope(scope: DatabaseScope) {
   const store = databaseScopeStorage.getStore();
   if (!store) throw new Error('Database scope can only be set during an API request.');
