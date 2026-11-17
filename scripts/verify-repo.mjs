@@ -13,6 +13,7 @@ for (const test of tests) {
 }
 
 const frontend = read('src/App.tsx');
+const platform = read('src/platform.ts');
 const backend = read('backend/index.ts');
 const css = read('src/index.css');
 const tenancy = read('backend/tenancy.ts');
@@ -66,7 +67,7 @@ if (!runtime.includes('scope_type: GLOBAL_COLLECTIONS.has(table) ? \'global\' : 
 
 const routeLines = backend.split('\n').filter(line => /^\s*['"](GET|POST|PUT|DELETE) /.test(line));
 for (const line of routeLines) {
-  if (line.includes('requireAuth()') && !line.includes('requireOrganisation()')) {
+  if (line.includes('requireAuth()') && !line.includes('requireOrganisation()') && !line.includes("'GET /api/organisations'")) {
     failures.push('An authenticated API route is missing organisation membership middleware.');
   }
   if (line.includes('/api/internal/') && !line.includes('requireLegacyOrganisation()')) {
@@ -75,6 +76,9 @@ for (const line of routeLines) {
 }
 if (!backend.includes('listCurrentOrganisationMembers(ctx)')) failures.push('Organisation member administration is not membership-scoped.');
 if (!backend.includes('listCurrentOrganisationRoles(ctx)')) failures.push('Organisation role reads are not relational and tenant-scoped.');
+if (!backend.includes("'GET /api/organisations': [requireAuth()")) failures.push('Authenticated organisation discovery is missing.');
+if (!platform.includes("'X-Organisation-Id'")) failures.push('The API client does not send the explicitly selected organisation context.');
+if (!platform.includes('setOrganisationId(id: string | null)')) failures.push('The API client cannot persist an explicit organisation selection.');
 if (!backend.includes('organisations/\u0024{ctx.organisation!.id}/tenders/')) failures.push('New attachment uploads are not organisation-prefixed.');
 if (!backend.includes("eq('status', 'active')")) failures.push('Reminder delivery does not filter active organisation memberships.');
 
