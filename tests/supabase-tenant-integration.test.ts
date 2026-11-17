@@ -529,7 +529,12 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       const organisationsB = await apiRequest(userB, undefined, '/api/organisations');
       assert.equal(organisationsB.status, 200);
       const organisationBodyB = await organisationsB.json() as { organisations: Array<{ id: string }> };
-      assert.deepEqual(organisationBodyB.organisations.map(item => item.id), [orgB]);
+      // userB was deliberately added to orgA by the member-lifecycle test,
+      // so both memberships must be reflected in the organisation selector.
+      assert.deepEqual(
+        organisationBodyB.organisations.map(item => item.id).sort(),
+        [orgA, orgB].sort(),
+      );
 
       const responseA = await apiRequest(userA, orgA, '/api/tenders');
       assert.equal(responseA.status, 200);
