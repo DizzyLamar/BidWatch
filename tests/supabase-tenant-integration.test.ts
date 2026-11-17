@@ -137,7 +137,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       table_name: 'users',
       record: {
         userId,
-        email: `bidwatch-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${suffix}@example.test`,
+        email: identities.find(identity => identity.id === userId)!.email,
         name,
         roleId: role.id,
         active: true,
@@ -405,7 +405,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
           content,
         }),
       });
-      assert.equal(upload.status, 201, await upload.text().catch(() => ''));
+      assert.equal(upload.status, 201, `attachment upload returned HTTP ${upload.status}`);
       const uploadBody = await upload.json() as { attachment: { id: string; filename: string } };
       assert.equal(uploadBody.attachment.filename, 'proof.txt');
       const attachmentId = uploadBody.attachment.id;
