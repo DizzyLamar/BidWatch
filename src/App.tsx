@@ -87,6 +87,7 @@ type User = {
   email: string;
   name: string;
   role: string;
+  isPlatformAdmin?: boolean;
   onboardingCompleted?: boolean;
   roleId?: string;
   permissions?: string[];
