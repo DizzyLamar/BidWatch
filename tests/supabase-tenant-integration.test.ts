@@ -117,6 +117,15 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
     return organisation.id;
   }
 
+  function authenticatedClient(userId: string) {
+    const token = tokens.get(userId);
+    assert.ok(token);
+    return createClient(supabaseUrl!, anonKey!, {
+      auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+  }
+
   async function authenticatedContext(userId: string, organisationId?: string): Promise<Context> {
     const token = tokens.get(userId);
     assert.ok(token);
@@ -208,6 +217,55 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
         .from('app_records').select('record').eq('id', recordA).single();
       assert.ifError(readError);
       assert.equal(storedA.record.title, 'A private tender');
+    });
+
+    await t.test('direct client access cannot bypass backend-only tables or app_records RLS', async () => {
+      const clientA = authenticatedClient(userA);
+
+      const { data: organisationRows, error: organisationError } = await clientA
+        .from('organisations').select('id').eq('id', orgA);
+      assert.ok(organisationError, 'authenticated clients must not have direct organisation-table privileges');
+      assert.equal(organisationRows, null);
+
+      const { data: membershipRows, error: membershipError } = await clientA
+        .from('organisation_members').select('id').eq('user_id', userA);
+      assert.ok(membershipError, 'authenticated clients must not have direct membership-table privileges');
+      assert.equal(membershipRows, null);
+
+      const { data: appRows, error: appReadError } = await clientA
+        .from('app_records').select('id').eq('table_name', 'tenders');
+      assert.ifError(appReadError);
+      assert.deepEqual(appRows, [], 'the deny-all app_records policy must hide backend records');
+
+      const { error: appWriteError } = await clientA.from('app_records').insert({
+        table_name: 'tenders',
+        record: { title: 'forged direct client write' },
+        scope_type: 'organisation',
+        organisation_id: orgA,
+      });
+      assert.ok(appWriteError, 'direct authenticated writes to app_records must be denied');
+
+      const { error: storageError } = await clientA.storage
+        .from('bidwatch')
+        .upload(`integration/${suffix}/blocked.txt`, 'blocked', { contentType: 'text/plain' });
+      assert.ok(storageError, 'direct authenticated uploads must be denied by the storage policy');
+
+      const ctx = await authenticatedContext(userA, orgA);
+      const platformAdminResult = await tenancy.requirePlatformAdmin()(ctx);
+      assert.equal((platformAdminResult as { status?: number })?.status, 403);
+    });
+
+    await t.test('database constraints reject assigning a role from another organisation', async () => {
+      const { error: crossOrganisationRoleError } = await admin
+        .from('organisation_members')
+        .insert({
+          organisation_id: orgA,
+          user_id: userB,
+          role_id: roleIds[1],
+          status: 'active',
+        });
+      assert.ok(crossOrganisationRoleError);
+      assert.equal(crossOrganisationRoleError.code, '23503');
     });
 
     await t.test('unauthenticated requests cannot resolve an organisation', async () => {
