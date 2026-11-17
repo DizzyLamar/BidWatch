@@ -627,6 +627,46 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       assert.equal(roleIdentityChange.error?.code, '23514', 'the owner role key cannot be changed');
     });
 
+    await t.test('scheduled notifications are idempotent and tenant-bound', async () => {
+      const notification = {
+        userId: userA,
+        tenderId: tenderA,
+        kind: 'deadline-7',
+        title: 'Bid due in 7 days',
+        body: 'Tenant-scoped reminder fixture.',
+        read: false,
+        createdAt: new Date().toISOString(),
+      };
+
+      const first = await admin.rpc('create_notification_once', {
+        p_organisation_id: orgA,
+        p_record: notification,
+      });
+      assert.ifError(first.error);
+      assert.equal(first.data, true, 'the first valid reminder should be inserted');
+
+      const duplicate = await admin.rpc('create_notification_once', {
+        p_organisation_id: orgA,
+        p_record: notification,
+      });
+      assert.ifError(duplicate.error);
+      assert.equal(duplicate.data, false, 'a repeated reminder for the same tenant/user/tender/day must be ignored');
+
+      const crossTenant = await admin.rpc('create_notification_once', {
+        p_organisation_id: orgB,
+        p_record: { ...notification, userId: userB },
+      });
+      assert.ifError(crossTenant.error);
+      assert.equal(crossTenant.data, false, 'a tender from another organisation must not receive a reminder in this tenant');
+
+      const { count, error: countError } = await admin.from('app_records')
+        .select('id', { count: 'exact', head: true })
+        .eq('table_name', 'notifications')
+        .eq('organisation_id', orgA);
+      assert.ifError(countError);
+      assert.equal(count, 1, 'only one notification record should exist');
+    });
+
     await t.test('attachment upload, signed URL, cross-tenant denial and deletion work end to end', async () => {
       const fileText = 'BidWatch tenant storage integration proof';
       const content = Buffer.from(fileText, 'utf8').toString('base64');
