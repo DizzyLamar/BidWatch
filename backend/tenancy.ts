@@ -141,13 +141,26 @@ export function organisationDb(organisationId: string) {
 export function requireOrganisation() {
   return async (ctx: RouterContext) => {
     if (!ctx.user) return error('Authentication required.', 401);
-    const organisationId = String(ctx.req.headers['x-organisation-id'] || '').trim();
-    if (!organisationId) return error('Select an organisation to continue.', 400);
+    let organisationId = String(ctx.req.headers['x-organisation-id'] || '').trim();
+    const db = client();
+    if (!organisationId) {
+      // A single active membership is an explicit, deterministic default.
+      // Multiple memberships require the client to send X-Organisation-Id.
+      const { data: memberships, error: membershipsError } = await db
+        .from('organisation_members').select('organisation_id')
+        .eq('user_id', ctx.user.userId).eq('status', 'active').limit(2);
+      if (membershipsError) {
+        console.error('Organisation membership lookup failed:', membershipsError.message);
+        return error('Could not verify organisation access.', 503);
+      }
+      if (!memberships?.length) return error('You are not an active member of any organisation.', 403);
+      if (memberships.length > 1) return error('Select an organisation to continue.', 400);
+      organisationId = memberships[0].organisation_id;
+    }
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(organisationId)) {
       return error('The selected organisation is invalid.', 400);
     }
 
-    const db = client();
     const { data: membership, error: membershipError } = await db
       .from('organisation_members')
       .select('id, organisation_id, role_id, status')
