@@ -282,6 +282,17 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
         .eq('organisation_id', orgA).eq('id', ownerRole.id);
       assert.ifError(permissionError);
 
+      const existingUserEmail = identities.find(identity => identity.id === userB)!.email;
+      const existingUserResponse = await apiRequest(userA, orgA, '/api/admin/users', {
+        method: 'POST', body: JSON.stringify({ email: existingUserEmail, roleId: ownerRole.id }),
+      });
+      assert.equal(existingUserResponse.status, 201, await existingUserResponse.text());
+      const { data: existingUserMembership, error: existingUserMembershipError } = await admin.from('organisation_members')
+        .select('id,status').eq('organisation_id', orgA).eq('user_id', userB).single();
+      assert.ifError(existingUserMembershipError);
+      assert.equal(existingUserMembership.status, 'active');
+      membershipIds.push(existingUserMembership.id);
+
       const invitedEmail = `bidwatch-invited-${suffix}@example.test`;
       const inviteResponse = await apiRequest(userA, orgA, '/api/admin/users', {
         method: 'POST', body: JSON.stringify({ email: invitedEmail, name: 'Invited Test User', roleId: ownerRole.id }),
