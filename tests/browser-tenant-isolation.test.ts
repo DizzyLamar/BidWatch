@@ -199,7 +199,10 @@ test('browser workspace switching isolates two users and rejects a forged tenant
     assert.ok(!titlesA.some(title => title.includes('Private Tender B ' + suffix)));
 
     const switcher = pageA.locator('.organisation-switcher select');
-    await switcher.selectOption(orgB);
+    await Promise.all([
+      pageA.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+      switcher.selectOption(orgB),
+    ]);
     await pageA.locator('.app-shell').waitFor({ state: 'visible' });
     await pageA.waitForFunction(id => localStorage.getItem('bidwatch-active-organisation') === id, orgB);
     const titlesB = await readTitles(pageA);
