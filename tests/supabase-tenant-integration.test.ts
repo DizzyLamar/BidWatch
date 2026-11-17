@@ -189,6 +189,31 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
     const orgA = await createOrganisation('Integration Workspace A', 'integration-a', userA);
     const orgB = await createOrganisation('Integration Workspace B', 'integration-b', userB);
 
+    await t.test('controlled bootstrap grants only the explicitly selected Auth identity', async () => {
+      const bootstrap = await import('../scripts/bootstrap-platform-admin');
+      const first = await bootstrap.bootstrapFirstPlatformAdmin(admin, userA);
+      assert.equal(first.userId, userA);
+      assert.equal(first.alreadyProvisioned, false);
+
+      const repeated = await bootstrap.bootstrapFirstPlatformAdmin(admin, userA);
+      assert.equal(repeated.alreadyProvisioned, true);
+
+      const { data: adminA, error: adminAError } = await admin
+        .from('platform_admins').select('user_id').eq('user_id', userA).maybeSingle();
+      assert.ifError(adminAError);
+      assert.equal(adminA?.user_id, userA);
+
+      const { data: adminB, error: adminBError } = await admin
+        .from('platform_admins').select('user_id').eq('user_id', userB).maybeSingle();
+      assert.ifError(adminBError);
+      assert.equal(adminB, null, 'the bootstrap must not grant platform access to another identity');
+
+      await assert.rejects(
+        bootstrap.bootstrapFirstPlatformAdmin(admin, randomUUID()),
+        /Could not verify the Auth identity|Auth identity does not exist/,
+      );
+    });
+
     const tenderA = randomUUID();
     const tenderB = randomUUID();
     for (const [id, organisationId, title] of [
@@ -459,7 +484,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
         'the denial must come from Storage authorization, not a missing bucket or unrelated failure',
       );
 
-      const ctx = await authenticatedContext(userA, orgA);
+      const ctx = await authenticatedContext(userB, orgB);
       const platformAdminResult = await tenancy.requirePlatformAdmin()(ctx);
       assert.equal((platformAdminResult as { status?: number })?.status, 403);
     });
@@ -564,30 +589,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       assert.equal((result as { status?: number })?.status, 401);
     });
 
-    await t.test('controlled bootstrap grants only the explicitly selected Auth identity', async () => {
-      const bootstrap = await import('../scripts/bootstrap-platform-admin');
-      const first = await bootstrap.bootstrapFirstPlatformAdmin(admin, userA);
-      assert.equal(first.userId, userA);
-      assert.equal(first.alreadyProvisioned, false);
 
-      const repeated = await bootstrap.bootstrapFirstPlatformAdmin(admin, userA);
-      assert.equal(repeated.alreadyProvisioned, true);
-
-      const { data: adminA, error: adminAError } = await admin
-        .from('platform_admins').select('user_id').eq('user_id', userA).maybeSingle();
-      assert.ifError(adminAError);
-      assert.equal(adminA?.user_id, userA);
-
-      const { data: adminB, error: adminBError } = await admin
-        .from('platform_admins').select('user_id').eq('user_id', userB).maybeSingle();
-      assert.ifError(adminBError);
-      assert.equal(adminB, null, 'the bootstrap must not grant platform access to another identity');
-
-      await assert.rejects(
-        bootstrap.bootstrapFirstPlatformAdmin(admin, randomUUID()),
-        /Could not verify the Auth identity|Auth identity does not exist/,
-      );
-    });
   } finally {
     currentScope = null;
     if (httpServer) {
