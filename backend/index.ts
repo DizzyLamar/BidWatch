@@ -182,7 +182,9 @@ async function listCurrentOrganisationMembers(ctx: RouterContext) {
     const role = roles.get(member.role_id);
     return { id: profile?.id || member.id, membershipId: member.id, userId: member.user_id,
       email: profile?.email || '', name: profile?.name || '', roleId: member.role_id,
-      role: role?.name || 'Unknown role', status: member.status, joinedAt: member.joined_at };
+      role: role?.name || 'Unknown role', active: member.status === 'active',
+      status: member.status === 'active' ? 'Active' : member.status === 'invited' ? 'Provisioned' : 'Suspended',
+      membershipStatus: member.status, joinedAt: member.joined_at };
   });
 }
 async function listUserOrganisations(ctx: RouterContext) {
@@ -464,5 +466,5 @@ export const handler = router({
   'PUT /api/admin/categories/:id': [requireAuth(), requireOrganisation(),requirePermission('categories.manage'), async ctx => { const old = await getById<{ name: string; active: boolean }>('categories', ctx.params.id); if (!old) return error('Category not found.', 404); const b = ctx.body as Record<string, unknown>; const next = { ...old, name: text(b.name, 'category', old.name), active: b.active === undefined ? old.active : Boolean(b.active) }; await db.update('categories', [{ id: old.id, record: next }]); return json({ category: next }); }],
   'GET /api/admin/audit': [requireAuth(), requireOrganisation(),requirePermission('audit.view'), async () => json({ events: (await listAll<Record<string, string>>('security_activity')).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 200) })],
   'GET /api/admin/storage': [requireAuth(), requireOrganisation(),requirePermission('settings.manage'), async ctx => json(await storageStats(ctx))],
-  'POST /api/admin/storage/cleanup': [requireAuth(), requireOrganisation(),requireSuperAdmin(), async ctx => { const attachments = await listAll<{ path: string }>('attachments'); const tracked = new Set(attachments.map(a => a.path)); const prefix = `organisations/${ctx.organisation!.id}/tenders/`; const listed = await storageService.listAll(prefix, 10000); const orphaned = listed.paths.filter(path => !tracked.has(path)); if (orphaned.length) { const deleted = await storageService.delete(orphaned); if (deleted.some(ok => !ok)) return error('Some orphaned files could not be removed.', 500); } return json({ ok: true, deleted: orphaned.length }); }],
+  'POST /api/admin/storage/cleanup': [requireAuth(), requireOrganisation(),requireSuperAdmin(), async ctx => { const attachments = await listAll<{ path: string }>('attachments'); const tracked = new Set(attachments.map(a => a.path)); const prefix = `organisations/${ctx.organisation!.id}/tenders/`; const listed = await storageService.listAll(prefix, 10000); const legacy = ctx.organisation!.slug === 'legacy-bidwatch-workspace' ? await storageService.listAll('tenders/', 10000) : { paths: [] as string[] }; const orphaned = [...listed.paths, ...legacy.paths].filter(path => !tracked.has(path)); if (orphaned.length) { const deleted = await storageService.delete(orphaned); if (deleted.some(ok => !ok)) return error('Some orphaned files could not be removed.', 500); } return json({ ok: true, deleted: orphaned.length }); }],
 });
