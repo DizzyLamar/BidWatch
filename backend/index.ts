@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { db, router, json, error, requireAuth, type RouterContext } from './runtime';
+import { requireOrganisation, requireLegacyOrganisation, requirePlatformAdmin } from './tenancy';
 import { storageService } from './storage';
 import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES } from './opportunity-discovery';
 import { verifyOpportunity } from './opportunity-verification';
@@ -186,37 +187,43 @@ async function seed() {  let roles = await listAll<Role>('roles');
 function perms(role: Role | null): Permission[] { return role?.name === 'Super Admin' ? PERMISSIONS.map(p => p.key) : role?.permissions || []; }
 
 async function currentUser(ctx: RouterContext) {
-  await seed();
-  const email = (ctx.user?.email || '').toLowerCase();
-  if (!email) return null;
-  let users = await listAll<User>('users');
-  const roles = await listAll<Role>('roles');
-  const superRole = roles.find(r => r.name === 'Super Admin');
-  let u = users.find(x => x.userId === ctx.user!.userId) || users.find(x => x.email.toLowerCase() === email);
+  if (!ctx.organisation || !ctx.user?.email) return null;
+  const email = ctx.user.email.toLowerCase();
+  const users = await listAll<User>('users');
+  const user = users.find(item => item.userId === ctx.user!.userId);
+  if (!user || user.email.toLowerCase() !== email) return null;
 
-  if (!u && email === SUPER_ADMIN_EMAIL) {
-    if (!superRole) return null;
-    const [id] = await db.add('users', [{ userId: ctx.user!.userId, email, name: ctx.user!.name || 'Super Admin', roleId: superRole.id, active: true, status: 'Active', createdAt: now(), updatedAt: now(), lastSeenAt: now() }]);
-    u = { id: id || '', userId: ctx.user!.userId, email, name: ctx.user!.name || 'Super Admin', roleId: superRole.id, active: true, status: 'Active', createdAt: now(), updatedAt: now(), lastSeenAt: now() };
-  }
-  if (!u) return null;
-  if (u.email.toLowerCase() !== email) return null;
-  if (email === SUPER_ADMIN_EMAIL && superRole) u.roleId = superRole.id;
-  if (!u.userId) {
-    if (!u.active || u.status === 'Suspended') return { ...u, role: await getById<Role>('roles', u.roleId), permissions: [] };
-    u = { ...u, userId: ctx.user!.userId, name: ctx.user!.name || u.name, status: 'Active', active: true, lastSeenAt: now(), updatedAt: now() };
-    await db.update('users', [{ id: u.id, record: u }]);
-  } else if (u.userId !== ctx.user!.userId) {
-    return { ...u, role: await getById<Role>('roles', u.roleId), permissions: [] };
-  } else if (email !== SUPER_ADMIN_EMAIL) {
-    u = { ...u, name: ctx.user!.name || u.name, lastSeenAt: now(), updatedAt: now() };
-    await db.update('users', [{ id: u.id, record: u }]);
-  }
-  const role = await getById<Role>('roles', u.roleId);
-  return { ...u, role, permissions: perms(role) };
+  // The membership and organisation role are the sole access-control source.
+  // Legacy users.active/status/roleId are retained only for compatibility.
+  const role: Role = {
+    id: ctx.organisation.roleId,
+    name: ctx.organisation.roleName,
+    description: '',
+    permissions: ctx.organisation.permissions.filter((value): value is Permission =>
+      PERMISSIONS.some(permission => permission.key === value)),
+    system: ctx.organisation.roleKey === 'owner',
+    createdAt: '',
+    updatedAt: '',
+  };
+  return {
+    ...user,
+    role,
+    permissions: role.permissions,
+    active: true,
+    status: 'Active' as const,
+  };
 }
-function requirePermission(permission: Permission) { return async (ctx: RouterContext) => { const u = await currentUser(ctx); if (!u) return error('Your Google account is not provisioned for BidWatch.', 403); if (!u.active || u.status === 'Suspended') return error('Your BidWatch access is suspended.', 403); if (!u.permissions.includes(permission)) return error('You do not have permission to perform this action.', 403); }; }
-function requireSuperAdmin() { return async (ctx: RouterContext) => { const u = await currentUser(ctx); if (!u || (ctx.user?.email || '').toLowerCase() !== SUPER_ADMIN_EMAIL || u.role?.name !== 'Super Admin') return error('Super Admin access required.', 403); }; }
+function requirePermission(permission: Permission) {
+  return async (ctx: RouterContext) => {
+    if (!ctx.organisation) return error('Select an organisation to continue.', 403);
+    if (!ctx.organisation.permissions.includes(permission)) return error('You do not have permission to perform this action.', 403);
+  };
+}
+function requireSuperAdmin() {
+  return async (ctx: RouterContext) => {
+    if (!ctx.organisation?.isPlatformAdmin) return error('Platform administrator access required.', 403);
+  };
+}
 async function actor(ctx: RouterContext) { const u = await currentUser(ctx); if (!u) throw new Error('Unauthorized'); return u; }
 async function securityLog(ctx: RouterContext, action: string, target: string, detail = '') { const u = await actor(ctx); await db.add('security_activity', [{ actorId: ctx.user!.userId, actorEmail: u.email, actorName: u.name, action, target, detail, createdAt: now() }]); }
 async function tenderLog(tenderId: string, ctx: RouterContext, action: string, detail = '') { const u = await actor(ctx); await db.add('activity', [{ tenderId, actorId: ctx.user!.userId, actorName: u.name, action, detail, createdAt: now() }]); }
@@ -285,10 +292,10 @@ export async function reminderHandler(_event: unknown) {
 }
 
 export const handler = router({
-  'POST /api/internal/reminders': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); return json(await reminderHandler(ctx)); }],
-  'POST /api/internal/opportunity-scan': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); return json(await procurementDiscoveryHandler(ctx)); }],
-  'GET /api/me': [requireAuth(), async ctx => { const u = await currentUser(ctx); if (!u) return error('Your Google account is not provisioned for BidWatch.', 403); if (!u.active || u.status === 'Suspended') return error('Your BidWatch access is suspended.', 403); return json({ user: { ...u, role: u.role?.name || 'Member', onboardingCompleted: u.onboardingCompleted === true } }); }], 'PUT /api/me/profile': [requireAuth(), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('A display name is required.', 400); const next = { ...u, name, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ user: next }); }],
-  'PUT /api/me/onboarding': [requireAuth(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
+  'POST /api/internal/reminders': [requireLegacyOrganisation(), async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); return json(await reminderHandler(ctx)); }],
+  'POST /api/internal/opportunity-scan': [requireLegacyOrganisation(), async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); return json(await procurementDiscoveryHandler(ctx)); }],
+  'GET /api/me': [requireAuth(), requireOrganisation(), requireOrganisation(), async ctx => { const u = await currentUser(ctx); if (!u) return error('Your Google account is not provisioned for BidWatch.', 403); return json({ user: { ...u, role: u.role?.name || 'Member', onboardingCompleted: u.onboardingCompleted === true } }); }], 'PUT /api/me/profile': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('A display name is required.', 400); const next = { ...u, name, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ user: next }); }],
+  'PUT /api/me/onboarding': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
   'GET /api/config': [requireAuth(), requirePermission('bids.view'), async () => { const records = await listAll<{ name: string; active: boolean }>('categories'); return json({ categories: records.filter(x => x.active).map(x => x.name), categoryRecords: records, statuses: STATUSES }); }],
   'GET /api/opportunities/sources': [requireAuth(), requirePermission('bids.view'), async () => json({ sources: DISCOVERY_SOURCES })],
   'GET /api/opportunities/updates': [requireAuth(), requirePermission('bids.view'), async () => { const updates = await listOpportunityUpdates(60); return json({ updates, meta: { build: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'unknown', count: updates.length, supabaseHost: process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).host : 'not-configured' } }); }],
