@@ -125,7 +125,7 @@ async function checked<T>(result: { data: T | null; error: any }) {
 function assertStoragePath(path: string, allowLegacy = true) {
   const scope = databaseScopeStorage.getStore()?.scope;
   if (!scope || scope.kind !== 'organisation') throw new Error('An organisation context is required for storage access.');
-  if (!path || path.startsWith('/') || path.includes('\\\\') || path.split('/').some(part => part === '..' || part === '.')) {
+  if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').some(part => part === '..' || part === '.')) {
     throw new Error('The storage path is invalid.');
   }
   const organisationPrefix = `organisations/${scope.organisationId}/`;
