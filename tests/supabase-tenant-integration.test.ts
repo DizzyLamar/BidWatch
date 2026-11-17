@@ -307,18 +307,26 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
 
       // Simulate the verified sign-in that follows the invitation. The API
       // activates only invitations belonging to this exact Auth user UUID.
+      const invitePassword = `Bw!Integration-${randomUUID()}-9x`;
       const { error: confirmError } = await admin.auth.admin.updateUserById(invitedUserId, {
-        email_confirm: true, password: `Bw!Integration-${randomUUID()}-9x`,
+        email_confirm: true, password: invitePassword,
       });
       assert.ifError(confirmError);
       const { data: signedIn, error: signInError } = await anon.auth.signInWithPassword({
-        email: invitedEmail, password: (await admin.auth.admin.getUserById(invitedUserId)).data.user!.user_metadata?.testPassword || '',
+        email: invitedEmail, password: invitePassword,
       });
-      // The invite's generated password is not stored in metadata; obtain a
-      // deterministic password in the separate explicit test sign-in below.
-      if (signInError || !signedIn.session?.access_token) {
-        assert.ok(signInError, 'the deliberately absent password should not authenticate');
-      }
+      assert.ifError(signInError);
+      assert.ok(signedIn.session?.access_token);
+      tokens.set(invitedUserId, signedIn.session.access_token);
+
+      const organisationsResponse = await apiRequest(invitedUserId, undefined, '/api/organisations');
+      assert.equal(organisationsResponse.status, 200, await organisationsResponse.text());
+      const organisationsBody = await organisationsResponse.json() as { organisations: Array<{ id: string }> };
+      assert.ok(organisationsBody.organisations.some(item => item.id === orgA));
+      const { data: acceptedMembership, error: acceptedMembershipError } = await admin.from('organisation_members')
+        .select('status').eq('id', membership.id).single();
+      assert.ifError(acceptedMembershipError);
+      assert.equal(acceptedMembership.status, 'active');
       await anon.auth.signOut();
 
       const suspended = await apiRequest(userA, orgA, `/api/admin/users/${membership.id}`, {
