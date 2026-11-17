@@ -393,7 +393,7 @@ export async function procurementDiscoveryHandler(_event: unknown) {
   });
 
   return {
-    statusCode: failures.length ? 207 : 200,
+    statusCode: failures.length ? 500 : 200,
     scannedAt: now(),
     organisationsProcessed: processed,
     organisationsFailed: failures.length,
@@ -478,8 +478,8 @@ export async function reminderHandler(_event: unknown) {
 }
 
 export const handler = router({
-  'POST /api/internal/reminders': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); }, async ctx => json(await reminderHandler(ctx))],
-  'POST /api/internal/opportunity-scan': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); }, async ctx => json(await procurementDiscoveryHandler(ctx))],
+  'POST /api/internal/reminders': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); }, async ctx => { const result = await reminderHandler(ctx); return json(result, result.statusCode); }],
+  'POST /api/internal/opportunity-scan': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); }, async ctx => { const result = await procurementDiscoveryHandler(ctx); return json(result, result.statusCode); }],
   'GET /api/organisations': [requireAuth(), async ctx => json({ organisations: await listUserOrganisations(ctx) })],
   'GET /api/me': [requireAuth(), requireOrganisation(), async ctx => { const u = await currentUser(ctx); if (!u) return error('Your Google account is not provisioned for BidWatch.', 403); return json({ user: { ...u, role: u.role?.name || 'Member', isPlatformAdmin: ctx.organisation!.isPlatformAdmin, onboardingCompleted: u.onboardingCompleted === true } }); }], 'PUT /api/me/profile': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('A display name is required.', 400); const next = { ...u, name, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ user: next }); }],
   'PUT /api/me/onboarding': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
