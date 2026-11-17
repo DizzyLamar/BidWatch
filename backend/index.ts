@@ -5,7 +5,6 @@ import { storageService } from './storage';
 import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES } from './opportunity-discovery';
 import { verifyOpportunity } from './opportunity-verification';
 
-const SUPER_ADMIN_EMAIL = 'ddzinja@gmail.com';
 const now = () => new Date().toISOString();
 
 type Permission =
@@ -43,7 +42,6 @@ const PERMISSIONS: Array<{ key: Permission; label: string; group: string; descri
   { key: 'kpis.view.access', label: 'View access KPIs', group: 'KPIs', description: 'See identity, role and suspension posture.' },
   { key: 'kpis.view.storage', label: 'View storage KPIs', group: 'KPIs', description: 'See attachment and storage health metrics.' },
 ];
-const DEFAULT_CATEGORIES = ['Cybersecurity', 'Software Development', 'ICT Infrastructure', 'IT Support', 'Data & Analytics', 'Consulting', 'Other'];
 const STATUSES = ['New', 'Reviewing', 'Pursuing', 'Preparing', 'Ready to Submit', 'Applied', 'Declined'];
 const ACTIVE_STATUSES = ['New', 'Reviewing', 'Pursuing', 'Preparing', 'Ready to Submit'];
 function validWorkflowTransition(from: string, to: string) {
@@ -54,7 +52,6 @@ function validWorkflowTransition(from: string, to: string) {
   // is deliberately controlled by the dedicated Apply/Decline endpoints.
   return ACTIVE_STATUSES.includes(from) && ACTIVE_STATUSES.includes(to);
 }
-const SENSITIVE_PERMISSIONS: Permission[] = ['users.manage', 'roles.manage', 'settings.manage', 'audit.view', 'kpis.view.access', 'kpis.view.storage'];
 const SAFE_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'png', 'jpg', 'jpeg', 'txt', 'zip']);
 const MIME_BY_EXTENSION: Record<string, string[]> = {
   pdf: ['application/pdf'],
@@ -195,26 +192,8 @@ async function listCurrentOrganisationRoles(ctx: RouterContext) {
 }
 async function getById<T>(table: string, id: string) { const [r] = await db.get<T>(table, [id]); return r ? { ...(r as T), id } : null; }
 function text(value: unknown, field: string, fallback = '') { const s = String(value ?? fallback).trim(); return s.slice(0, MAX_TEXT[field] ?? 500); }
-function validEmail(email: string) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254; }
 function validUrl(value: string) { if (!value) return true; try { const u = new URL(value); return u.protocol === 'http:' || u.protocol === 'https:'; } catch { return false; } }
 function validDeadline(value: string) { const d = new Date(value).getTime(); return Number.isFinite(d); }
-function roleHasSensitive(role: Role | null) { return Boolean(role?.permissions.some(p => SENSITIVE_PERMISSIONS.includes(p))); }
-
-async function seed() {  let roles = await listAll<Role>('roles');
-  if (!roles.length) {
-    const ids = await db.add('roles', [
-      { name: 'Super Admin', description: 'Protected platform owner. Manages users, roles and system configuration.', permissions: PERMISSIONS.map(p => p.key), system: true, createdAt: now(), updatedAt: now() },
-      { name: 'Member', description: 'Standard team access for reviewing and contributing bids.', permissions: ['bids.view', 'bids.create', 'attachments.upload', 'notifications.view', 'kpis.view.overview', 'kpis.view.deadlines', 'kpis.view.workload'], system: true, createdAt: now(), updatedAt: now() },
-      { name: 'Bid Manager', description: 'Operational access for workflow, ownership and submission.', permissions: ['bids.view', 'bids.create', 'bids.edit', 'bids.assign', 'bids.apply', 'bids.decline', 'attachments.upload', 'attachments.delete', 'notifications.view', 'kpis.view.overview', 'kpis.view.pipeline', 'kpis.view.deadlines', 'kpis.view.submissions', 'kpis.view.workload', 'kpis.view.team'], system: true, createdAt: now(), updatedAt: now() },
-    ]);
-    roles = [];
-    for (const id of ids.filter((x): x is string => Boolean(x))) { const r = await getById<Role>('roles', id); if (r) roles.push(r); }
-  }
-  const cats = await listAll<{ name: string; active: boolean; createdAt: string }>('categories');
-  if (!cats.length) await db.add('categories', DEFAULT_CATEGORIES.map(name => ({ name, active: true, createdAt: now() })));
-  return roles;
-}
-function perms(role: Role | null): Permission[] { return role?.name === 'Super Admin' ? PERMISSIONS.map(p => p.key) : role?.permissions || []; }
 
 async function currentUser(ctx: RouterContext) {
   if (!ctx.organisation || !ctx.user?.email) return null;
