@@ -1,6 +1,7 @@
 import express, { type Request, type Response } from 'express';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createClient } from '@supabase/supabase-js';
+import { assertOrganisationStoragePath, createScopedRecordRepository, type DatabaseScope } from './scoped-records';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
@@ -84,15 +85,7 @@ export function requireAuth() {
   };
 }
 
-type RecordRow = { id: string; table_name: string; record: Record<string, unknown> };
-type DatabaseScope = { kind: 'global' } | { kind: 'organisation'; organisationId: string; legacyStorage?: boolean };
 const databaseScopeStorage = new AsyncLocalStorage<{ scope: DatabaseScope | null }>();
-const GLOBAL_COLLECTIONS = new Set(['users', 'opportunity_source_runs']);
-const ORGANISATION_COLLECTIONS = new Set([
-  'activity', 'attachments', 'bid_history', 'bid_requirements', 'bid_tasks',
-  'categories', 'notifications', 'opportunity_changes', 'opportunity_updates',
-  'opportunity_watchlists', 'roles', 'security_activity', 'tenders',
-]);
 
 export function setDatabaseScope(scope: DatabaseScope) {
   const store = databaseScopeStorage.getStore();
@@ -100,104 +93,18 @@ export function setDatabaseScope(scope: DatabaseScope) {
   store.scope = scope;
 }
 
-function applyDatabaseScope(table: string, query: any) {
-  const scope = databaseScopeStorage.getStore()?.scope;
-  if (!scope) throw new Error('A verified database scope is required for every record operation.');
-  if (GLOBAL_COLLECTIONS.has(table)) return query.eq('scope_type', 'global').is('organisation_id', null);
-  if (ORGANISATION_COLLECTIONS.has(table)) {
-    if (scope.kind !== 'organisation') throw new Error(`An organisation context is required to access ${table}.`);
-    return query.eq('scope_type', 'organisation').eq('organisation_id', scope.organisationId);
-  }
-  throw new Error(`Collection "${table}" is not registered for scoped access.`);
-}
-
-function cleanScopedRecord(record: Record<string, unknown>) {
-  const { id: _id, scope_type: _scope, organisation_id: _organisation, ...payload } = record;
-  return payload;
-}
-
-async function checked<T>(result: { data: T | null; error: any }) {
-  if (!supabase) throw new Error('Supabase is not configured.');
-  if (result.error) throw new Error(result.error.message);
-  return result.data as T;
-}
+export const db = createScopedRecordRepository(
+  supabase,
+  () => databaseScopeStorage.getStore()?.scope ?? null,
+);
 
 function assertStoragePath(path: string, allowLegacy = true) {
-  const scope = databaseScopeStorage.getStore()?.scope;
-  if (!scope || scope.kind !== 'organisation') throw new Error('An organisation context is required for storage access.');
-  if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').some(part => part === '..' || part === '.')) {
-    throw new Error('The storage path is invalid.');
-  }
-  const organisationPrefix = `organisations/${scope.organisationId}/`;
-  const legacyPrefixAllowed = allowLegacy && scope.legacyStorage === true && path.startsWith('tenders/');
-  if (!path.startsWith(organisationPrefix) && !legacyPrefixAllowed) {
-    throw new Error('The storage path is outside the active organisation.');
-  }
+  assertOrganisationStoragePath(
+    path,
+    databaseScopeStorage.getStore()?.scope ?? null,
+    allowLegacy,
+  );
 }
-
-export const db = {
-  async list<T>(table: string, options: { limit?: number } = {}) {
-    const query = supabase!.from('app_records').select('id,table_name,record')
-      .eq('table_name', table).order('created_at', { ascending: false })
-      .limit(Math.min(options.limit ?? 500, 5000));
-    const result = await applyDatabaseScope(table, query);
-    const rows = await checked<RecordRow[]>(result);
-    return { items: rows.map(row => ({ ...(row.record as T), id: row.id })) };
-  },
-  async get<T>(table: string, ids: string[]) {
-    if (!ids.length) return [];
-    const query = supabase!.from('app_records').select('id,record').eq('table_name', table).in('id', ids);
-    const result = await applyDatabaseScope(table, query);
-    const rows = await checked<Array<{ id: string; record: T }>>(result);
-    return rows.map(row => ({ ...(row.record as T), id: row.id }));
-  },
-  async add(table: string, records: Record<string, unknown>[]) {
-    if (!records.length) return [];
-    const scope = databaseScopeStorage.getStore()?.scope;
-    if (!scope) throw new Error('A verified database scope is required for every record operation.');
-    // Validate collection and scope before constructing the insert payload.
-    applyDatabaseScope(table, supabase!.from('app_records').select('id'));
-    const rows = records.map(record => ({
-      ...(typeof record.id === 'string' ? { id: record.id } : {}),
-      table_name: table,
-      record: cleanScopedRecord(record),
-      scope_type: GLOBAL_COLLECTIONS.has(table) ? 'global' : 'organisation',
-      organisation_id: GLOBAL_COLLECTIONS.has(table) ? null : scope.kind === 'organisation' ? scope.organisationId : null,
-    }));
-    if (ORGANISATION_COLLECTIONS.has(table) && scope.kind !== 'organisation') {
-      throw new Error(`An organisation context is required to insert ${table}.`);
-    }
-    const result = await supabase!.from('app_records').insert(rows).select('id');
-    const inserted = await checked<Array<{ id: string }>>(result);
-    return inserted.map(row => row.id);
-  },
-  async update(table: string, updates: Array<{ id: string; record: object }>) {
-    if (!updates.length) return;
-    const ids = updates.map(item => item.id);
-    if (new Set(ids).size !== ids.length) throw new Error('A scoped update cannot contain duplicate record IDs.');
-    const lookup = supabase!.from('app_records').select('id').eq('table_name', table).in('id', ids);
-    const visible = await checked<Array<{ id: string }>>(applyDatabaseScope(table, lookup));
-    const visibleIds = new Set(visible.map(row => row.id));
-    if (ids.some(id => !visibleIds.has(id))) throw new Error(`Scoped update rejected: one or more ${table} records are unavailable in this scope.`);
-    for (const update of updates) {
-      const query = supabase!.from('app_records')
-        .update({ record: cleanScopedRecord(update.record as Record<string, unknown>), updated_at: new Date().toISOString() })
-        .eq('table_name', table).eq('id', update.id).select('id');
-      const result = await checked<Array<{ id: string }>>(applyDatabaseScope(table, query));
-      if (!result.length) throw new Error(`Scoped update found no ${table} record with ID ${update.id}.`);
-    }
-  },
-  async delete(table: string, ids: string[]) {
-    if (!ids.length) return;
-    if (new Set(ids).size !== ids.length) throw new Error('A scoped delete cannot contain duplicate record IDs.');
-    const lookup = supabase!.from('app_records').select('id').eq('table_name', table).in('id', ids);
-    const visible = await checked<Array<{ id: string }>>(applyDatabaseScope(table, lookup));
-    if (visible.length !== ids.length) throw new Error(`Scoped delete rejected: one or more ${table} records are unavailable in this scope.`);
-    const query = supabase!.from('app_records').delete().eq('table_name', table).in('id', ids).select('id');
-    const deleted = await checked<Array<{ id: string }>>(applyDatabaseScope(table, query));
-    if (deleted.length !== ids.length) throw new Error(`Scoped delete did not match every requested ${table} record.`);
-  },
-};
 
 export const storageService = {
   async put(path: string, content: string, contentType: string) {
