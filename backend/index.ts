@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { db, router, json, error, requireAuth, supabaseAdmin, type RouterContext } from './runtime';
-import { requireOrganisation, requireLegacyOrganisation, requirePlatformAdmin } from './tenancy';
+import { requireOrganisation, requireLegacyOrganisation } from './tenancy';
 import { storageService } from './storage';
 import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES } from './opportunity-discovery';
 import { verifyOpportunity } from './opportunity-verification';
@@ -259,14 +259,20 @@ async function securityLog(ctx: RouterContext, action: string, target: string, d
 async function tenderLog(tenderId: string, ctx: RouterContext, action: string, detail = '') { const u = await actor(ctx); await db.add('activity', [{ tenderId, actorId: ctx.user!.userId, actorName: u.name, action, detail, createdAt: now() }]); }
 async function requireTender(id: string) { return getById<Tender>('tenders', id); }
 
-async function storageStats() {
+async function storageStats(ctx: RouterContext) {
+  if (!ctx.organisation) throw new Error('Organisation context is unavailable.');
   const attachments = await listAll<{ filename: string; size: number; path: string }>('attachments');
-  const listed = await storageService.listAll('tenders/', 10000);
+  const prefix = `organisations/${ctx.organisation.id}/tenders/`;
+  const listed = await storageService.listAll(prefix, 10000);
+  const legacyPaths = ctx.organisation.slug === 'legacy-bidwatch-workspace'
+    ? await storageService.listAll('tenders/', 10000)
+    : { paths: [] as string[] };
+  const paths = [...listed.paths, ...legacyPaths.paths];
   const tracked = new Set(attachments.map(a => a.path));
-  const orphaned = listed.paths.filter(p => !tracked.has(p));
+  const orphaned = paths.filter(p => !tracked.has(p));
   const trackedBytes = attachments.reduce((sum, a) => sum + Number(a.size || 0), 0);
   const largest = attachments.reduce<{ name: string; size: number } | undefined>((best, a) => !best || Number(a.size || 0) > best.size ? { name: a.filename, size: Number(a.size || 0) } : best, undefined);
-  return { trackedBytes, attachmentCount: attachments.length, storedFileCount: listed.paths.length, untrackedFileCount: orphaned.length, largestFile: largest, quota: 'fair-use' };
+  return { trackedBytes, attachmentCount: attachments.length, storedFileCount: paths.length, untrackedFileCount: orphaned.length, largestFile: largest, quota: 'fair-use' };
 }
 
 function kpiPermissionForSection(section: string): Permission { return `kpis.view.${section}` as Permission; }
@@ -298,14 +304,19 @@ async function buildKpis(ctx: RouterContext, u: Awaited<ReturnType<typeof curren
     result.workload = { myActive: mine.length, myDue7: due7 };
   }
   if (u?.permissions.includes(kpiPermissionForSection('team'))) {
-    const users = (await listAll<User>('users')).filter(x => x.active && x.status !== 'Suspended');
+    const members = (await listCurrentOrganisationMembers(ctx)).filter(member => member.status === 'active');
     const assigned = active.filter(t => t.assigneeId).length; const overdueAssigned = active.filter(t => t.assigneeId && new Date(t.deadline).getTime() < nowMs).length;
-    result.team = { activeUsers: users.length, assignedActiveBids: assigned, unassignedActiveBids: active.filter(t => !t.assigneeId).length, averageActiveBidsPerUser: users.length ? Math.round((assigned / users.length) * 10) / 10 : 0, overdueAssigned };
+    result.team = { activeUsers: members.length, assignedActiveBids: assigned, unassignedActiveBids: active.filter(t => !t.assigneeId).length, averageActiveBidsPerUser: members.length ? Math.round((assigned / members.length) * 10) / 10 : 0, overdueAssigned };
   }
   if (u?.permissions.includes(kpiPermissionForSection('access'))) {
-    const users = await listAll<User>('users'); const roles = await listAll<Role>('roles');
-    result.access = { provisioned: users.filter(x => x.status === 'Provisioned').length, active: users.filter(x => x.status === 'Active' && x.active).length, suspended: users.filter(x => x.status === 'Suspended' || !x.active).length, roles: roles.length };
-  }  if (u?.permissions.includes(kpiPermissionForSection('storage'))) result.storage = await storageStats();
+    const members = await listCurrentOrganisationMembers(ctx); const roles = await listCurrentOrganisationRoles(ctx);
+    result.access = {
+      provisioned: members.filter(x => x.status === 'invited').length,
+      active: members.filter(x => x.status === 'active').length,
+      suspended: members.filter(x => x.status === 'suspended' || x.status === 'removed').length,
+      roles: roles.length,
+    };
+  }  if (u?.permissions.includes(kpiPermissionForSection('storage'))) result.storage = await storageStats(ctx);
   return result;
 }
 
@@ -316,8 +327,34 @@ export async function procurementDiscoveryHandler(_event: unknown) {
 }
 
 export async function reminderHandler(_event: unknown) {
-  const tenders = await listAll<Tender>('tenders'); const users = await listAll<User>('users'); const notes = await listAll<{ tenderId: string; userId: string; kind: string; createdAt: string }>('notifications');
-  for (const t of tenders) { if (['Applied', 'Declined'].includes(t.status)) continue; const diff = new Date(t.deadline).getTime() - Date.now(); const days = Math.ceil(diff / 86400000); if (diff >= 0 && ![14, 7, 3, 1, 0].includes(days)) continue; const kind = `deadline-${days}`; const targets = t.assigneeId ? users.filter(u => u.id === t.assigneeId && u.status !== 'Suspended' && u.active) : users.filter(u => u.status !== 'Suspended' && u.active); for (const u of targets) if (!notes.some(n => n.tenderId === t.id && n.userId === u.userId && n.kind === kind && new Date(n.createdAt).toDateString() === new Date().toDateString())) await db.add('notifications', [{ userId: u.userId, tenderId: t.id, kind, title: diff < 0 ? 'Bid overdue' : days === 0 ? 'Bid due today' : `Bid due in ${days} days`, body: `${t.title} for ${t.organisation} is ${diff < 0 ? 'past its deadline' : 'approaching its deadline'}.`, read: false, createdAt: now() }]); }
+  if (!supabaseAdmin) throw new Error('Supabase is not configured.');
+  const { data: workspace, error: workspaceError } = await supabaseAdmin.from('organisations')
+    .select('id').eq('slug', 'legacy-bidwatch-workspace').maybeSingle();
+  if (workspaceError || !workspace) throw new Error(workspaceError?.message || 'Legacy workspace not found.');
+  const { data: memberships, error: membershipError } = await supabaseAdmin.from('organisation_members')
+    .select('user_id,status').eq('organisation_id', workspace.id).eq('status', 'active');
+  if (membershipError) throw new Error(membershipError.message);
+  const activeUserIds = new Set((memberships || []).map(member => member.user_id));
+  const tenders = await listAll<Tender>('tenders');
+  const users = (await listAll<User>('users')).filter(user => Boolean(user.userId && activeUserIds.has(user.userId)));
+  const notes = await listAll<{ tenderId: string; userId: string; kind: string; createdAt: string }>('notifications');
+  for (const t of tenders) {
+    if (['Applied', 'Declined'].includes(t.status)) continue;
+    const diff = new Date(t.deadline).getTime() - Date.now();
+    const days = Math.ceil(diff / 86400000);
+    if (diff >= 0 && ![14, 7, 3, 1, 0].includes(days)) continue;
+    const kind = `deadline-${days}`;
+    const targets = t.assigneeId ? users.filter(user => user.id === t.assigneeId) : users;
+    for (const user of targets) {
+      if (!user.userId || notes.some(note => note.tenderId === t.id && note.userId === user.userId && note.kind === kind && new Date(note.createdAt).toDateString() === new Date().toDateString())) continue;
+      await db.add('notifications', [{
+        userId: user.userId, tenderId: t.id, kind,
+        title: diff < 0 ? 'Bid overdue' : days === 0 ? 'Bid due today' : `Bid due in ${days} days`,
+        body: `${t.title} for ${t.organisation} is ${diff < 0 ? 'past its deadline' : 'approaching its deadline'}.`,
+        read: false, createdAt: now(),
+      }]);
+    }
+  }
   return { statusCode: 200 };
 }
 
@@ -392,7 +429,7 @@ export const handler = router({
   'POST /api/tenders/:id/apply': [requireAuth(), requireOrganisation(),requirePermission('bids.apply'), async ctx => { const u = await actor(ctx); const old = await requireTender(ctx.params.id); if (!old) return error('Bid not found.', 404); if (['Applied', 'Declined'].includes(old.status)) return error('This bid is already closed.', 409); const b = ctx.body as Record<string, unknown>; const currentRevision = Number(old.revision || 1); const expectedRevision = b.expectedRevision === undefined ? currentRevision : Number(b.expectedRevision); if (!Number.isInteger(expectedRevision) || expectedRevision !== currentRevision) return error('This bid was changed by another user. Refresh the record before recording the submission.', 409); const submissionReference = text(b.submissionReference, 'submissionReference'); const submissionMethod = text(b.submissionMethod, 'title'); const submissionReceiptUrl = text(b.submissionReceiptUrl, 'url'); const submissionNotes = text(b.submissionNotes, 'notes'); if (old.status !== 'Ready to Submit') return error('A bid must reach Ready to Submit before it can be recorded as submitted.', 409); if (!submissionMethod) return error('Submission method is required.', 400); if (!validUrl(submissionReceiptUrl)) return error('Submission receipt URL must use http or https.', 400); if (!submissionReference && !submissionReceiptUrl && !submissionNotes) return error('Submission evidence is required: provide a confirmation/reference, receipt URL, or submission notes.', 400); const next = { ...old, status: 'Applied', appliedBy: u.id, appliedAt: now(), submissionReference, submissionMethod, submissionReceiptUrl, submissionNotes, revision: currentRevision + 1 }; await db.update('tenders', [{ id: old.id, record: next }]); await tenderLog(old.id, ctx, 'marked the bid Applied', [submissionMethod, submissionReference, submissionReceiptUrl].filter(Boolean).join(' · ')); return json({ tender: next }); }],
   'POST /api/tenders/:id/decline': [requireAuth(), requireOrganisation(),requirePermission('bids.decline'), async ctx => { const old = await requireTender(ctx.params.id); if (!old) return error('Bid not found.', 404); if (['Applied', 'Declined'].includes(old.status)) return error('This bid is already closed.', 409); const b = ctx.body as Record<string, unknown>; const currentRevision = Number(old.revision || 1); const expectedRevision = b.expectedRevision === undefined ? currentRevision : Number(b.expectedRevision); if (!Number.isInteger(expectedRevision) || expectedRevision !== currentRevision) return error('This bid was changed by another user. Refresh the record before declining it.', 409); await db.update('tenders', [{ id: old.id, record: { ...old, status: 'Declined', revision: currentRevision + 1 } }]); await tenderLog(old.id, ctx, 'marked the bid Declined'); return json({ tender: await getById<Tender>('tenders', old.id) }); }],
   'GET /api/tenders/:id/attachments': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async ctx => { const tender = await requireTender(ctx.params.id); if (!tender) return error('Bid not found.', 404); const a = await listAll<{ tenderId: string; filename: string; mimeType: string; size: number; path: string; uploadedBy: string; uploadedAt: string }>('attachments'); return json({ attachments: a.filter(x => x.tenderId === tender.id) }); }],
-  'POST /api/tenders/:id/attachments': [requireAuth(), requireOrganisation(),requirePermission('attachments.upload'), async ctx => { const u = await actor(ctx); const tender = await requireTender(ctx.params.id); if (!tender) return error('Bid not found.', 404); const b = ctx.body as Record<string, unknown>; if (!rateLimit(`upload:${ctx.user!.userId}`, RATE_LIMITS.upload)) return error('Upload rate limit reached. Try again in a few minutes.', 429); const filename = String(b.filename || '').trim(); const mimeType = String(b.mimeType || 'application/octet-stream').toLowerCase(); const size = Number(b.size || 0); const content = String(b.content || ''); const validationError = validateUpload(filename, mimeType, size, content); if (validationError) return error(validationError, 400); const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_'); const path = `tenders/${tender.id}/${crypto.randomUUID()}-${safeName}`; const ok = await storageService.put(path, content, mimeType); if (!ok) return error('File upload failed.', 500); const [id] = await db.add('attachments', [{ tenderId: tender.id, filename, mimeType, size, path, uploadedBy: u.id, uploadedAt: now() }]); if (!id) { await storageService.delete([path]); return error('Could not save attachment metadata.', 500); } await tenderLog(tender.id, ctx, 'uploaded an attachment', filename); return json({ attachment: { id, filename } }, 201); }],
+  'POST /api/tenders/:id/attachments': [requireAuth(), requireOrganisation(),requirePermission('attachments.upload'), async ctx => { const u = await actor(ctx); const tender = await requireTender(ctx.params.id); if (!tender) return error('Bid not found.', 404); const b = ctx.body as Record<string, unknown>; if (!rateLimit(`upload:${ctx.user!.userId}`, RATE_LIMITS.upload)) return error('Upload rate limit reached. Try again in a few minutes.', 429); const filename = String(b.filename || '').trim(); const mimeType = String(b.mimeType || 'application/octet-stream').toLowerCase(); const size = Number(b.size || 0); const content = String(b.content || ''); const validationError = validateUpload(filename, mimeType, size, content); if (validationError) return error(validationError, 400); const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_'); const path = `organisations/${ctx.organisation!.id}/tenders/${tender.id}/${crypto.randomUUID()}-${safeName}`; const ok = await storageService.put(path, content, mimeType); if (!ok) return error('File upload failed.', 500); const [id] = await db.add('attachments', [{ tenderId: tender.id, filename, mimeType, size, path, uploadedBy: u.id, uploadedAt: now() }]); if (!id) { await storageService.delete([path]); return error('Could not save attachment metadata.', 500); } await tenderLog(tender.id, ctx, 'uploaded an attachment', filename); return json({ attachment: { id, filename } }, 201); }],
   'GET /api/attachments/:id/url': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async ctx => { const a = await getById<{ tenderId: string; path: string }>('attachments', ctx.params.id); if (!a || !(await requireTender(a.tenderId))) return error('Attachment not found.', 404); const url = await storageService.getUrl(a.path); return json({ url }); }],
   'DELETE /api/attachments/:id': [requireAuth(), requireOrganisation(),requirePermission('attachments.delete'), async ctx => { const a = await getById<{ tenderId: string; path: string; filename: string }>('attachments', ctx.params.id); if (!a) return error('Attachment not found.', 404); if (!(await requireTender(a.tenderId))) return error('Attachment not found.', 404); const [deleted] = await storageService.delete([a.path]); if (!deleted) return error('Could not delete the stored document.', 500); await db.delete('attachments', [ctx.params.id]); await tenderLog(a.tenderId, ctx, 'deleted an attachment', a.filename); return json({ ok: true }); }],
   'GET /api/tenders/:id/activity': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async ctx => { if (!(await requireTender(ctx.params.id))) return error('Bid not found.', 404); const a = await listAll<{ tenderId: string; actorName: string; action: string; detail: string; createdAt: string }>('activity'); return json({ activities: a.filter(x => x.tenderId === ctx.params.id).sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime()) }); }],
@@ -410,5 +447,5 @@ export const handler = router({
   'PUT /api/admin/categories/:id': [requireAuth(), requireOrganisation(),requirePermission('categories.manage'), async ctx => { const old = await getById<{ name: string; active: boolean }>('categories', ctx.params.id); if (!old) return error('Category not found.', 404); const b = ctx.body as Record<string, unknown>; const next = { ...old, name: text(b.name, 'category', old.name), active: b.active === undefined ? old.active : Boolean(b.active) }; await db.update('categories', [{ id: old.id, record: next }]); return json({ category: next }); }],
   'GET /api/admin/audit': [requireAuth(), requireOrganisation(),requirePermission('audit.view'), async () => json({ events: (await listAll<Record<string, string>>('security_activity')).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 200) })],
   'GET /api/admin/storage': [requireAuth(), requireOrganisation(),requirePermission('settings.manage'), async () => json(await storageStats())],
-  'POST /api/admin/storage/cleanup': [requireAuth(), requireOrganisation(),requireSuperAdmin(), async () => { const attachments = await listAll<{ path: string }>('attachments'); const tracked = new Set(attachments.map(a => a.path)); const listed = await storageService.listAll('tenders/', 10000); const orphaned = listed.paths.filter(path => !tracked.has(path)); if (orphaned.length) { const deleted = await storageService.delete(orphaned); if (deleted.some(ok => !ok)) return error('Some orphaned files could not be removed.', 500); } return json({ ok: true, deleted: orphaned.length }); }],
+  'POST /api/admin/storage/cleanup': [requireAuth(), requireOrganisation(),requireSuperAdmin(), async ctx => { const attachments = await listAll<{ path: string }>('attachments'); const tracked = new Set(attachments.map(a => a.path)); const prefix = `organisations/${ctx.organisation!.id}/tenders/`; const listed = await storageService.listAll(prefix, 10000); const orphaned = listed.paths.filter(path => !tracked.has(path)); if (orphaned.length) { const deleted = await storageService.delete(orphaned); if (deleted.some(ok => !ok)) return error('Some orphaned files could not be removed.', 500); } return json({ ok: true, deleted: orphaned.length }); }],
 });
