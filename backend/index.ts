@@ -467,7 +467,8 @@ export const handler = router({
   'POST /api/notifications/:id/read': [requireAuth(), requireOrganisation(),requirePermission('notifications.view'), async ctx => { const n = await getById<{ userId: string; read: boolean }> ('notifications', ctx.params.id); if (!n || n.userId !== ctx.user!.userId) return error('Notification not found.', 404); await db.update('notifications', [{ id: n.id, record: { ...n, read: true } }]); return json({ ok: true }); }], 'POST /api/notifications/read-all': [requireAuth(), requireOrganisation(),requirePermission('notifications.view'), async ctx => { const notes = await listAll<{ userId: string; read: boolean }>('notifications'); const mine = notes.filter(n => n.userId === ctx.user!.userId && !n.read); if (mine.length) await db.update('notifications', mine.map(n => ({ id: n.id, record: { ...n, read: true } }))); return json({ ok: true }); }], 'DELETE /api/notifications': [requireAuth(), requireOrganisation(),requirePermission('notifications.view'), async ctx => { const notes = await listAll<{ userId: string }>('notifications'); const mine = notes.filter(n => n.userId === ctx.user!.userId); if (mine.length) await db.delete('notifications', mine.map(n => n.id)); return json({ ok: true }); }],
     'GET /api/admin/users': [requireAuth(), requireOrganisation(), async ctx => { if (!ctx.organisation?.permissions.includes('users.view') && !ctx.organisation?.permissions.includes('users.manage')) return error('You do not have permission to view organisation members.', 403); return json({ users: await listCurrentOrganisationMembers(ctx) }); }],
     'POST /api/admin/users': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async ctx => {
-      if (!ctx.organisation || !supabaseAdmin || !ctx.user) return error('Organisation context is unavailable.', 503);
+      const adminClient = supabaseAdmin;
+      if (!ctx.organisation || !adminClient || !ctx.user) return error('Organisation context is unavailable.', 503);
       const body = ctx.body as Record<string, unknown>;
       const email = String(body.email || '').trim().toLowerCase();
       const name = text(body.name, 'title');
@@ -475,7 +476,7 @@ export const handler = router({
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return error('Enter a valid email address.', 400);
       if (!roleId) return error('Select an organisation role.', 400);
 
-      const { data: role, error: roleError } = await supabaseAdmin.from('organisation_roles')
+      const { data: role, error: roleError } = await adminClient.from('organisation_roles')
         .select('id,key,permissions').eq('organisation_id', ctx.organisation.id).eq('id', roleId).maybeSingle();
       if (roleError) throw new Error(roleError.message);
       if (!role) return error('The selected role does not belong to this organisation.', 400);
@@ -489,14 +490,14 @@ export const handler = router({
       let authUserId = existingProfile?.userId || '';
       let createdAuthUser = false;
       if (authUserId) {
-        const { data: identity, error: identityError } = await supabaseAdmin.auth.admin.getUserById(authUserId);
+        const { data: identity, error: identityError } = await adminClient.auth.admin.getUserById(authUserId);
         if (identityError || !identity?.user
           || String(identity.user.email || '').toLowerCase() !== email
           || !identity.user.email_confirmed_at) {
           return error('The existing BidWatch profile does not match a verified Auth identity for this email. Ask the person to sign in first.', 409);
         }
       } else {
-        const { data: invited, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+        const { data: invited, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
           data: { full_name: name || email.split('@')[0], name: name || email.split('@')[0] },
         });
         if (inviteError || !invited.user) {
@@ -508,21 +509,21 @@ export const handler = router({
           userId: authUserId, email, name: name || email.split('@')[0], roleId,
           active: true, status: 'Active', createdAt: now(), updatedAt: now(), onboardingCompleted: false,
         };
-        const { error: profileError } = await supabaseAdmin.from('app_records').insert({
+        const { error: profileError } = await adminClient.from('app_records').insert({
           table_name: 'users', record: profileRecord, scope_type: 'global', organisation_id: null,
         });
         if (profileError) {
-          await supabaseAdmin.auth.admin.deleteUser(authUserId);
+          await adminClient.auth.admin.deleteUser(authUserId);
           throw new Error('The invitation identity was created but its BidWatch profile could not be saved.');
         }
       }
 
       const rollbackCreatedIdentity = async () => {
         if (!createdAuthUser) return;
-        await supabaseAdmin.from('app_records').delete().eq('table_name', 'users').contains('record', { userId: authUserId });
-        await supabaseAdmin.auth.admin.deleteUser(authUserId);
+        await adminClient.from('app_records').delete().eq('table_name', 'users').contains('record', { userId: authUserId });
+        await adminClient.auth.admin.deleteUser(authUserId);
       };
-      const { data: existingMembership, error: membershipLookupError } = await supabaseAdmin.from('organisation_members')
+      const { data: existingMembership, error: membershipLookupError } = await adminClient.from('organisation_members')
         .select('id,status').eq('organisation_id', ctx.organisation.id).eq('user_id', authUserId).maybeSingle();
       if (membershipLookupError) {
         await rollbackCreatedIdentity();
@@ -535,11 +536,11 @@ export const handler = router({
 
       const membershipStatus = createdAuthUser ? 'invited' : 'active';
       const membershipWrite = existingMembership
-        ? await supabaseAdmin.from('organisation_members').update({
+        ? await adminClient.from('organisation_members').update({
             role_id: roleId, status: membershipStatus,
             joined_at: membershipStatus === 'active' ? now() : null, updated_at: now(),
           }).eq('organisation_id', ctx.organisation.id).eq('id', existingMembership.id)
-        : await supabaseAdmin.from('organisation_members').insert({
+        : await adminClient.from('organisation_members').insert({
             organisation_id: ctx.organisation.id, user_id: authUserId, role_id: roleId,
             status: membershipStatus, joined_at: membershipStatus === 'active' ? now() : null,
           });
@@ -551,9 +552,9 @@ export const handler = router({
       return json({ ok: true, status: membershipStatus, email }, 201);
     }],
     'PUT /api/admin/users/:id': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async ctx => {
-      if (!ctx.organisation || !supabaseAdmin || !ctx.user) return error('Organisation context is unavailable.', 503);
+      if (!ctx.organisation || !adminClient || !ctx.user) return error('Organisation context is unavailable.', 503);
       const body = ctx.body as Record<string, unknown>;
-      const { data: member, error: memberError } = await supabaseAdmin.from('organisation_members')
+      const { data: member, error: memberError } = await adminClient.from('organisation_members')
         .select('id,user_id,role_id,status,joined_at').eq('organisation_id', ctx.organisation.id).eq('id', ctx.params.id).maybeSingle();
       if (memberError) throw new Error(memberError.message);
       if (!member) return error('Organisation membership not found.', 404);
@@ -566,7 +567,7 @@ export const handler = router({
       }
       const nextRoleId = body.roleId === undefined ? member.role_id : text(body.roleId, 'reference');
       if (body.roleId !== undefined) {
-        const { data: role, error: roleError } = await supabaseAdmin.from('organisation_roles')
+        const { data: role, error: roleError } = await adminClient.from('organisation_roles')
           .select('id,key,permissions').eq('organisation_id', ctx.organisation.id).eq('id', nextRoleId).maybeSingle();
         if (roleError) throw new Error(roleError.message);
         if (!role) return error('The selected role does not belong to this organisation.', 400);
@@ -580,13 +581,13 @@ export const handler = router({
         return error('You cannot suspend your own organisation access.', 409);
       }
       if (changesAccess) {
-        const { data: ownerRoleRows, error: ownerRoleError } = await supabaseAdmin.from('organisation_roles')
+        const { data: ownerRoleRows, error: ownerRoleError } = await adminClient.from('organisation_roles')
           .select('id').eq('organisation_id', ctx.organisation.id).eq('key', 'owner');
         if (ownerRoleError) throw new Error(ownerRoleError.message);
         const ownerIds = (ownerRoleRows || []).map(row => row.id);
         if (member.status === 'active' && ownerIds.includes(member.role_id)
           && (nextStatus !== 'active' || !ownerIds.includes(nextRoleId))) {
-          const { count, error: ownerCountError } = await supabaseAdmin.from('organisation_members')
+          const { count, error: ownerCountError } = await adminClient.from('organisation_members')
             .select('id', { count: 'exact', head: true }).eq('organisation_id', ctx.organisation.id)
             .eq('status', 'active').in('role_id', ownerIds);
           if (ownerCountError) throw new Error(ownerCountError.message);
@@ -595,7 +596,7 @@ export const handler = router({
       }
       const update: Record<string, unknown> = { role_id: nextRoleId, status: nextStatus, updated_at: now() };
       if (nextStatus === 'active' && member.status !== 'active' && !member.joined_at) update.joined_at = now();
-      const { error: updateError } = await supabaseAdmin.from('organisation_members')
+      const { error: updateError } = await adminClient.from('organisation_members')
         .update(update).eq('organisation_id', ctx.organisation.id).eq('id', member.id);
       if (updateError) throw new Error(updateError.message);
       await securityLog(ctx, nextRoleId !== member.role_id ? 'member.role_changed' : 'member.status_changed',
@@ -603,26 +604,26 @@ export const handler = router({
       return json({ ok: true, status: nextStatus, roleId: nextRoleId });
     }],
     'DELETE /api/admin/users/:id': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async ctx => {
-      if (!ctx.organisation || !supabaseAdmin || !ctx.user) return error('Organisation context is unavailable.', 503);
-      const { data: member, error: memberError } = await supabaseAdmin.from('organisation_members')
+      if (!ctx.organisation || !adminClient || !ctx.user) return error('Organisation context is unavailable.', 503);
+      const { data: member, error: memberError } = await adminClient.from('organisation_members')
         .select('id,user_id,role_id,status').eq('organisation_id', ctx.organisation.id).eq('id', ctx.params.id).maybeSingle();
       if (memberError) throw new Error(memberError.message);
       if (!member) return error('Organisation membership not found.', 404);
       if (member.user_id === ctx.user.userId) return error('You cannot remove your own organisation membership.', 409);
       if (member.status === 'active') {
-        const { data: ownerRoles, error: ownerRoleError } = await supabaseAdmin.from('organisation_roles')
+        const { data: ownerRoles, error: ownerRoleError } = await adminClient.from('organisation_roles')
           .select('id').eq('organisation_id', ctx.organisation.id).eq('key', 'owner');
         if (ownerRoleError) throw new Error(ownerRoleError.message);
         const ownerIds = (ownerRoles || []).map(row => row.id);
         if (ownerIds.includes(member.role_id)) {
-          const { count, error: countError } = await supabaseAdmin.from('organisation_members')
+          const { count, error: countError } = await adminClient.from('organisation_members')
             .select('id', { count: 'exact', head: true }).eq('organisation_id', ctx.organisation.id)
             .eq('status', 'active').in('role_id', ownerIds);
           if (countError) throw new Error(countError.message);
           if ((count || 0) <= 1) return error('The last active organisation owner cannot be removed.', 409);
         }
       }
-      const { error: removeError } = await supabaseAdmin.from('organisation_members')
+      const { error: removeError } = await adminClient.from('organisation_members')
         .update({ status: 'removed', updated_at: now() }).eq('organisation_id', ctx.organisation.id).eq('id', member.id);
       if (removeError) throw new Error(removeError.message);
       await securityLog(ctx, 'member.removed', member.user_id, `Previous status: ${member.status}`);
@@ -630,7 +631,7 @@ export const handler = router({
     }],
     'GET /api/admin/roles': [requireAuth(), requireOrganisation(), async ctx => { if (!ctx.organisation?.permissions.includes('roles.view') && !ctx.organisation?.permissions.includes('users.manage')) return error('You do not have permission to view organisation roles.', 403); return json({ roles: await listCurrentOrganisationRoles(ctx), permissions: PERMISSIONS }); }],
       'POST /api/admin/roles': [requireAuth(), requireOrganisation(), requirePermission('roles.manage'), async ctx => {
-    if (!ctx.organisation || !supabaseAdmin) return error('Organisation context is unavailable.', 503);
+    if (!ctx.organisation || !adminClient) return error('Organisation context is unavailable.', 503);
     const body = ctx.body as Record<string, unknown>;
     const name = text(body.name, 'title');
     const description = text(body.description, 'description');
@@ -647,7 +648,7 @@ export const handler = router({
     if (existing.some(role => role.name.toLowerCase() === name.toLowerCase() || role.key === key)) {
       return error('A role with that name already exists.', 409);
     }
-    const { data, error: insertError } = await supabaseAdmin.from('organisation_roles')
+    const { data, error: insertError } = await adminClient.from('organisation_roles')
       .insert({ organisation_id: ctx.organisation.id, key, name, description, permissions, is_system: false })
       .select('id,key,name,description,permissions,is_system').single();
     if (insertError) throw new Error(insertError.message);
