@@ -297,10 +297,23 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
 
       currentScope = { kind: 'organisation', organisationId: orgA };
       const visibleA = await repository.list<{ title: string }>('tenders');
-      assert.deepEqual(visibleA.items.map(row => row.id), [recordA]);
+      const visibleAIds = new Set(visibleA.items.map(row => row.id));
+      assert.deepEqual(
+        [...visibleAIds].sort(),
+        [tenderA, recordA].sort(),
+        'A must see both of its own fixture records and no records belonging to B',
+      );
       assert.deepEqual(await repository.get('tenders', [recordB]), []);
 
       currentScope = { kind: 'organisation', organisationId: orgB };
+      const visibleB = await repository.list<{ title: string }>('tenders');
+      const visibleBIds = new Set(visibleB.items.map(row => row.id));
+      assert.deepEqual(
+        [...visibleBIds].sort(),
+        [tenderB, recordB].sort(),
+        'B must see both of its own fixture records and no records belonging to A',
+      );
+
       await assert.rejects(
         repository.update('tenders', [{ id: recordA, record: { title: 'tampered by B' } }]),
         /Scoped update rejected/,
