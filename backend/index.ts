@@ -15,6 +15,7 @@ type Permission =
   | 'kpis.view.overview' | 'kpis.view.pipeline' | 'kpis.view.deadlines' | 'kpis.view.submissions'
   | 'kpis.view.workload' | 'kpis.view.team' | 'kpis.view.access' | 'kpis.view.storage';
 
+const SENSITIVE_PERMISSIONS: Permission[] = ['users.manage', 'roles.manage', 'settings.manage', 'audit.view', 'kpis.view.access', 'kpis.view.storage'];
 const PERMISSIONS: Array<{ key: Permission; label: string; group: string; description: string }> = [
   { key: 'bids.view', label: 'View bids', group: 'Bids', description: 'View opportunities and details.' },
   { key: 'bids.create', label: 'Create bids', group: 'Bids', description: 'Add opportunities.' },
@@ -458,9 +459,78 @@ export const handler = router({
     'POST /api/admin/users': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async () => error('Member invitations are temporarily unavailable while organisation membership management is being migrated.', 409)],
     'PUT /api/admin/users/:id': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async () => error('Member access changes are temporarily unavailable while organisation membership management is being migrated.', 409)],
     'GET /api/admin/roles': [requireAuth(), requireOrganisation(), requirePermission('roles.view'), async ctx => json({ roles: await listCurrentOrganisationRoles(ctx), permissions: PERMISSIONS })],
-    'POST /api/admin/roles': [requireAuth(), requireOrganisation(), requirePermission('roles.manage'), async () => error('Organisation role changes are temporarily unavailable while relational role management is being completed.', 409)],
-    'PUT /api/admin/roles/:id': [requireAuth(), requireOrganisation(), requirePermission('roles.manage'), async () => error('Organisation role changes are temporarily unavailable while relational role management is being completed.', 409)],
-    'DELETE /api/admin/roles/:id': [requireAuth(), requireOrganisation(), requirePermission('roles.manage'), async () => error('Organisation role changes are temporarily unavailable while relational role management is being completed.', 409)],
+      'POST /api/admin/roles': [requireAuth(), requireOrganisation(), requirePermission('roles.manage'), async ctx => {
+    if (!ctx.organisation || !supabaseAdmin) return error('Organisation context is unavailable.', 503);
+    const body = ctx.body as Record<string, unknown>;
+    const name = text(body.name, 'title');
+    const description = text(body.description, 'description');
+    const suppliedPermissions = Array.isArray(body.permissions) ? body.permissions : [];
+    const permissions = suppliedPermissions.filter((value): value is Permission => PERMISSIONS.some(item => item.key === value));
+    if (!name) return error('Role name is required.', 400);
+    if (permissions.length !== suppliedPermissions.length) return error('One or more permissions are invalid.', 400);
+    if (!ctx.organisation.isPlatformAdmin && permissions.some(permission => SENSITIVE_PERMISSIONS.includes(permission))) {
+      return error('Only a platform administrator can allocate sensitive permissions.', 403);
+    }
+    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!key) return error('Role name must contain letters or numbers.', 400);
+    const existing = await listCurrentOrganisationRoles(ctx);
+    if (existing.some(role => role.name.toLowerCase() === name.toLowerCase() || role.key === key)) {
+      return error('A role with that name already exists.', 409);
+    }
+    const { data, error: insertError } = await supabaseAdmin.from('organisation_roles')
+      .insert({ organisation_id: ctx.organisation.id, key, name, description, permissions, is_system: false })
+      .select('id,key,name,description,permissions,is_system').single();
+    if (insertError) throw new Error(insertError.message);
+    await securityLog(ctx, 'role.created', name, permissions.join(', '));
+    return json({ role: { id: data.id, key: data.key, name: data.name, description: data.description || '', permissions: data.permissions || [], system: data.is_system } }, 201);
+  }],
+      'PUT /api/admin/roles/:id': [requireAuth(), requireOrganisation(), requirePermission('roles.manage'), async ctx => {
+    if (!ctx.organisation || !supabaseAdmin) return error('Organisation context is unavailable.', 503);
+    const { data: old, error: lookupError } = await supabaseAdmin.from('organisation_roles')
+      .select('id,key,name,description,permissions,is_system').eq('organisation_id', ctx.organisation.id)
+      .eq('id', ctx.params.id).maybeSingle();
+    if (lookupError) throw new Error(lookupError.message);
+    if (!old) return error('Role not found.', 404);
+    if (old.is_system) return error('System roles are protected. Create a custom role instead.', 403);
+    const body = ctx.body as Record<string, unknown>;
+    const name = body.name === undefined ? old.name : text(body.name, 'title');
+    const description = body.description === undefined ? old.description || '' : text(body.description, 'description');
+    const suppliedPermissions = body.permissions === undefined ? old.permissions || [] : Array.isArray(body.permissions) ? body.permissions : [];
+    const permissions = suppliedPermissions.filter((value): value is Permission => PERMISSIONS.some(item => item.key === value));
+    if (!name) return error('Role name is required.', 400);
+    if (permissions.length !== suppliedPermissions.length) return error('One or more permissions are invalid.', 400);
+    if (!ctx.organisation.isPlatformAdmin && permissions.some(permission => SENSITIVE_PERMISSIONS.includes(permission))) {
+      return error('Only a platform administrator can allocate sensitive permissions.', 403);
+    }
+    const existing = await listCurrentOrganisationRoles(ctx);
+    if (existing.some(role => role.id !== old.id && role.name.toLowerCase() === name.toLowerCase())) {
+      return error('A role with that name already exists.', 409);
+    }
+    const { data, error: updateError } = await supabaseAdmin.from('organisation_roles')
+      .update({ name, description, permissions }).eq('organisation_id', ctx.organisation.id)
+      .eq('id', old.id).select('id,key,name,description,permissions,is_system').single();
+    if (updateError) throw new Error(updateError.message);
+    await securityLog(ctx, 'role.updated', old.name, permissions.join(', '));
+    return json({ role: { id: data.id, key: data.key, name: data.name, description: data.description || '', permissions: data.permissions || [], system: data.is_system } });
+  }],
+      'DELETE /api/admin/roles/:id': [requireAuth(), requireOrganisation(), requirePermission('roles.manage'), async ctx => {
+    if (!ctx.organisation || !supabaseAdmin) return error('Organisation context is unavailable.', 503);
+    const { data: old, error: lookupError } = await supabaseAdmin.from('organisation_roles')
+      .select('id,name,is_system').eq('organisation_id', ctx.organisation.id)
+      .eq('id', ctx.params.id).maybeSingle();
+    if (lookupError) throw new Error(lookupError.message);
+    if (!old) return error('Role not found.', 404);
+    if (old.is_system) return error('System roles cannot be deleted.', 403);
+    const { data: memberships, error: membershipError } = await supabaseAdmin.from('organisation_members')
+      .select('id').eq('organisation_id', ctx.organisation.id).eq('role_id', old.id).limit(1);
+    if (membershipError) throw new Error(membershipError.message);
+    if (memberships?.length) return error('This role is assigned to organisation members. Reassign them first.', 409);
+    const { error: deleteError } = await supabaseAdmin.from('organisation_roles')
+      .delete().eq('organisation_id', ctx.organisation.id).eq('id', old.id);
+    if (deleteError) throw new Error(deleteError.message);
+    await securityLog(ctx, 'role.deleted', old.name);
+    return json({ ok: true });
+  }],
   'GET /api/admin/categories': [requireAuth(), requireOrganisation(),requirePermission('categories.manage'), async () => json({ categories: await listAll<{ name: string; active: boolean; createdAt: string }>('categories') })],
   'POST /api/admin/categories': [requireAuth(), requireOrganisation(),requirePermission('categories.manage'), async ctx => { const name = text((ctx.body as Record<string, unknown>).name, 'category'); if (!name) return error('Category name is required.', 400); const cats = await listAll<{ name: string; active: boolean }>('categories'); if (cats.some(x => x.name.toLowerCase() === name.toLowerCase())) return error('That category already exists.', 409); const [id] = await db.add('categories', [{ name, active: true, createdAt: now() }]); return json({ category: await getById('categories', id || '') }, 201); }],
   'PUT /api/admin/categories/:id': [requireAuth(), requireOrganisation(),requirePermission('categories.manage'), async ctx => { const old = await getById<{ name: string; active: boolean }>('categories', ctx.params.id); if (!old) return error('Category not found.', 404); const b = ctx.body as Record<string, unknown>; const next = { ...old, name: text(b.name, 'category', old.name), active: b.active === undefined ? old.active : Boolean(b.active) }; await db.update('categories', [{ id: old.id, record: next }]); return json({ category: next }); }],
