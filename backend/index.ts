@@ -513,14 +513,19 @@ export const handler = router({
         }
       }
 
+      const rollbackCreatedIdentity = async () => {
+        if (!createdAuthUser) return;
+        await supabaseAdmin.from('app_records').delete().eq('table_name', 'users').contains('record', { userId: authUserId });
+        await supabaseAdmin.auth.admin.deleteUser(authUserId);
+      };
       const { data: existingMembership, error: membershipLookupError } = await supabaseAdmin.from('organisation_members')
         .select('id,status').eq('organisation_id', ctx.organisation.id).eq('user_id', authUserId).maybeSingle();
-      if (membershipLookupError) throw new Error(membershipLookupError.message);
+      if (membershipLookupError) {
+        await rollbackCreatedIdentity();
+        throw new Error(membershipLookupError.message);
+      }
       if (existingMembership && existingMembership.status !== 'removed') {
-        if (createdAuthUser) {
-          await supabaseAdmin.from('app_records').delete().eq('table_name', 'users').contains('record', { userId: authUserId });
-          await supabaseAdmin.auth.admin.deleteUser(authUserId);
-        }
+        await rollbackCreatedIdentity();
         return error('This person already has a membership in this organisation.', 409);
       }
 
@@ -535,10 +540,7 @@ export const handler = router({
             status: membershipStatus, joined_at: membershipStatus === 'active' ? now() : null,
           });
       if (membershipWrite.error) {
-        if (createdAuthUser) {
-          await supabaseAdmin.from('app_records').delete().eq('table_name', 'users').contains('record', { userId: authUserId });
-          await supabaseAdmin.auth.admin.deleteUser(authUserId);
-        }
+        await rollbackCreatedIdentity();
         throw new Error(membershipWrite.error.message);
       }
       await securityLog(ctx, 'member.invited', email, `Role: ${role.key}; status: ${membershipStatus}`);
