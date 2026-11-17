@@ -184,7 +184,7 @@ async function listCurrentOrganisationMembers(ctx: RouterContext) {
     const status = member.status === 'active' ? 'Active'
       : member.status === 'invited' ? 'Provisioned'
       : member.status === 'removed' ? 'Removed' : 'Suspended';
-    return { id: member.id, membershipId: member.id, userId: member.user_id,
+    return { id: profile?.id || member.id, membershipId: member.id, userId: member.user_id,
       profileId: profile?.id || null, email: profile?.email || '', name: profile?.name || '',
       roleId: member.role_id, role: role?.name || 'Unknown role', active: member.status === 'active',
       status, membershipStatus: member.status, joinedAt: member.joined_at };
