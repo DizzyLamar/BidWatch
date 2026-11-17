@@ -277,6 +277,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       const { data: ownerRole, error: ownerRoleLookupError } = await admin.from('organisation_roles')
         .select('id').eq('organisation_id', orgA).single();
       assert.ifError(ownerRoleLookupError);
+      assert.ok(ownerRole);
       const { error: permissionError } = await admin.from('organisation_roles')
         .update({ permissions: ['bids.view', 'users.view', 'users.manage'] })
         .eq('organisation_id', orgA).eq('id', ownerRole.id);
@@ -290,6 +291,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       const { data: existingUserMembership, error: existingUserMembershipError } = await admin.from('organisation_members')
         .select('id,status').eq('organisation_id', orgA).eq('user_id', userB).single();
       assert.ifError(existingUserMembershipError);
+      assert.ok(existingUserMembership);
       assert.equal(existingUserMembership.status, 'active');
       membershipIds.push(existingUserMembership.id);
 
@@ -313,6 +315,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       const { data: membership, error: membershipLookupError } = await admin.from('organisation_members')
         .select('id,status,role_id').eq('organisation_id', orgA).eq('user_id', invitedUserId).single();
       assert.ifError(membershipLookupError);
+      assert.ok(membership);
       assert.equal(membership.status, 'invited');
       membershipIds.push(membership.id);
 
@@ -337,6 +340,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       const { data: acceptedMembership, error: acceptedMembershipError } = await admin.from('organisation_members')
         .select('status').eq('id', membership.id).single();
       assert.ifError(acceptedMembershipError);
+      assert.ok(acceptedMembership);
       assert.equal(acceptedMembership.status, 'active');
       await anon.auth.signOut();
 
@@ -344,6 +348,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
         .insert({ organisation_id: orgA, key: `observer_${suffix.slice(0, 8)}`, name: 'Integration Observer', permissions: ['bids.view'], is_system: false })
         .select('id').single();
       assert.ifError(observerRoleError);
+      assert.ok(observerRole);
       roleIds.push(observerRole.id);
       const changedRole = await apiRequest(userA, orgA, `/api/admin/users/${membership.id}`, {
         method: 'PUT', body: JSON.stringify({ roleId: observerRole.id }),
@@ -367,6 +372,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       const { data: finalMembership, error: finalMembershipError } = await admin.from('organisation_members')
         .select('status').eq('id', membership.id).single();
       assert.ifError(finalMembershipError);
+      assert.ok(finalMembership);
       assert.equal(finalMembership.status, 'removed');
     });
 
