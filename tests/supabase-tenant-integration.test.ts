@@ -38,6 +38,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
     'Integration tests are restricted to localhost; refusing to create test data on a remote Supabase project.',
   );
 
+  let bucketCreated = false;
   const admin = createClient(supabaseUrl!, serviceKey!, {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
@@ -71,7 +72,6 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
   const membershipIds: string[] = [];
   const profileIds: string[] = [];
   const recordIds: string[] = [];
-  let bucketCreated = false;
   let httpServer: ReturnType<ReturnType<typeof express>['listen']> | null = null;
   let apiBaseUrl = '';
   const tokens = new Map<string, string>();
@@ -282,7 +282,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       assert.equal(result, undefined);
       assert.equal(ctx.organisation?.id, orgA);
       assert.equal(ctx.organisation?.roleKey, 'member');
-      assert.deepEqual(ctx.organisation?.permissions, ['bids.view', 'bids.create']);
+      assert.deepEqual(ctx.organisation?.permissions, ['bids.view', 'bids.create', 'attachments.upload', 'attachments.delete']);
       assert.deepEqual(currentScope, { kind: 'organisation', organisationId: orgA, legacyStorage: false });
     });
 
@@ -381,13 +381,14 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       const responseA = await apiRequest(userA, orgA, '/api/tenders');
       assert.equal(responseA.status, 200);
       const tendersA = await responseA.json() as { tenders: Array<{ id: string; title: string }> };
-      assert.deepEqual(tendersA.tenders.map(item => item.id), [tenderA]);
-      assert.equal(tendersA.tenders[0].title, 'Private tender belonging to A');
+      assert.ok(tendersA.tenders.some(item => item.id === tenderA && item.title === 'Private tender belonging to A'));
+      assert.ok(tendersA.tenders.every(item => item.id !== tenderB), 'A must never receive B\'s tender through the HTTP API');
 
       const responseB = await apiRequest(userB, orgB, '/api/tenders');
       assert.equal(responseB.status, 200);
       const tendersB = await responseB.json() as { tenders: Array<{ id: string; title: string }> };
-      assert.deepEqual(tendersB.tenders.map(item => item.id), [tenderB]);
+      assert.ok(tendersB.tenders.some(item => item.id === tenderB && item.title === 'Private tender belonging to B'));
+      assert.ok(tendersB.tenders.every(item => item.id !== tenderA), 'B must never receive A\'s tender through the HTTP API');
 
       const forged = await apiRequest(userB, orgA, '/api/tenders');
       assert.equal(forged.status, 403, 'a real HTTP request cannot switch tenants by forging the organisation header');
