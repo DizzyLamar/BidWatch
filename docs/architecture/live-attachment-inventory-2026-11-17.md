@@ -31,6 +31,7 @@ Consequently, the PR's tenant-scoped attachment migration script cannot be run a
 
 - Rows with a top-level `record.path`: **0**
 - Rows with a top-level path beginning `tenders/`: **0**
+- Recursive JSONB traversal across all 124 record payloads found **0 nested `path` keys, 0 `attachments` keys, and 0 `legacyPath` keys**.
 - Rows in a table named `attachments`: **0**
 - Tender and bid-history payloads inspected for top-level attachment arrays: **none found**
 - The single live tender has no attachment metadata field in its payload.
