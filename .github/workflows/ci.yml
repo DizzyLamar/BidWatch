@@ -42,6 +42,9 @@ jobs:
     name: Local Supabase tenant isolation
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Avoid collisions with a PostgreSQL listener on the runner's default 54322.
+      SUPABASE_DB_PORT: 55432
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,9 +59,6 @@ jobs:
         run: npm ci
 
       - name: Start local Supabase (Auth, PostgREST, Database and Storage)
-        env:
-          # GitHub-hosted runners may already have a PostgreSQL listener on the CLI default.
-          SUPABASE_DB_PORT: 55432
         run: npx supabase start --exclude realtime,imgproxy,studio,edge-runtime,analytics,vector,supavisor
 
       - name: Run real Auth and PostgREST integration tests
