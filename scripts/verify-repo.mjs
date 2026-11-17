@@ -15,6 +15,8 @@ for (const test of tests) {
 const frontend = read('src/App.tsx');
 const backend = read('backend/index.ts');
 const css = read('src/index.css');
+const tenancy = read('backend/tenancy.ts');
+const runtime = read('backend/runtime.ts');
 const uiCss = read('src/ui-system.css');
 
 for (const [pattern, description] of [
@@ -39,6 +41,21 @@ for (const [pattern, description] of [
 ]) {
   if (!backend.includes(pattern)) failures.push(`Backend security/lifecycle regression: ${description} missing.`);
 }
+
+for (const [pattern, description] of [
+  ['GLOBAL_COLLECTIONS', 'explicit global collection allowlist'],
+  ['ORGANISATION_COLLECTIONS', 'explicit organisation collection allowlist'],
+  ["eq('scope_type', 'global')", 'global scope filtering'],
+  ["eq('scope_type', 'organisation')", 'organisation scope filtering'],
+  ["eq('organisation_id', organisationId)", 'organisation ID filtering'],
+  ["eq('user_id', ctx.user.userId)", 'membership identity verification'],
+  ["eq('status', 'active')", 'active membership verification'],
+  ["from('platform_admins')", 'database-backed platform administrator lookup'],
+  ['ctx.organisation =', 'verified organisation request context'],
+]) {
+  if (!tenancy.includes(pattern)) failures.push(`Tenant isolation regression: ${description} missing.`);
+}
+if (!runtime.includes('organisation?:')) failures.push('Router context is missing the verified organisation context.');
 
 if (!uiCss.includes('.modal-backdrop')) failures.push('Confirmation modal styling is missing from the UI system.');
 if (!css.includes('.form-error')) failures.push('Inline production error styling is missing.');
