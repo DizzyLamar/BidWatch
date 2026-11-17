@@ -280,7 +280,7 @@ export default function App() {
         setKpis(kpiResponse.data.kpis || {});
         setCategories(cfg.data.categories);
         setCategoryRecords(cfg.data.categoryRecords || []);
-        if (me.data.user.permissions?.includes('users.view')) {
+        if (me.data.user.permissions?.includes('users.view') || me.data.user.permissions?.includes('users.manage')) {
           const adminUsers = await cachedGet('/api/admin/users', 30000);
           setUsers(adminUsers.data.users);
         }
@@ -648,7 +648,7 @@ export default function App() {
                 }}
               />
             )}
-            {(profile.permissions?.includes('users.view') || profile.permissions?.includes('roles.view') || profile.permissions?.includes('categories.manage')) && (
+            {(profile.permissions?.includes('users.view') || profile.permissions?.includes('users.manage') || profile.permissions?.includes('roles.view') || profile.permissions?.includes('categories.manage')) && (
               <>
                 <div className="nav-label">Access & configuration</div>
                 {(profile.permissions?.includes('users.view') || profile.permissions?.includes('roles.view')) && (
