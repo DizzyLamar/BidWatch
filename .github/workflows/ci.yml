@@ -58,6 +58,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Playwright browser runtime
+        run: |
+          npm install --no-save --package-lock=false playwright
+          npx playwright install --with-deps chromium
+
       - name: Start local Supabase (Auth, PostgREST, Database and Storage)
         run: npx supabase start --exclude realtime,imgproxy,studio,edge-runtime,analytics,vector,supavisor
 
@@ -69,7 +74,12 @@ jobs:
           export SUPABASE_URL="$API_URL"
           export SUPABASE_ANON_KEY="$ANON_KEY"
           export SUPABASE_SECRET_KEY="$SERVICE_ROLE_KEY"
+          export VITE_SUPABASE_URL="$API_URL"
+          export VITE_SUPABASE_PUBLISHABLE_KEY="$ANON_KEY"
+          export BROWSER_TEST_PORT=4173
+          npm run build
           npm run test:integration
+          npm run test:browser
 
       - name: Stop local Supabase
         if: always()
