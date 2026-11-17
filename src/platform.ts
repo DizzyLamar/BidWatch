@@ -14,6 +14,8 @@ export const supabase = createClient(
   { auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true } }
 );
 
+const ACTIVE_ORGANISATION_KEY = 'bidwatch-active-organisation';
+
 function apiError(status: number, data: any) {
   const err = new Error(data?.error || 'Request failed.');
   (err as any).status = status;
@@ -22,6 +24,13 @@ function apiError(status: number, data: any) {
 }
 
 export const api = {
+  setOrganisationId(id: string | null) {
+    if (!id) localStorage.removeItem(ACTIVE_ORGANISATION_KEY);
+    else localStorage.setItem(ACTIVE_ORGANISATION_KEY, id);
+  },
+  getOrganisationId() {
+    return localStorage.getItem(ACTIVE_ORGANISATION_KEY);
+  },
   async request(method: string, url: string, body?: unknown) {
     const { data: { session } } = await supabase.auth.getSession();
     const response = await fetch(url, {
@@ -29,6 +38,7 @@ export const api = {
       headers: {
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         ...(session?.access_token ? { Authorization: 'Bearer ' + session.access_token } : {}),
+        ...(localStorage.getItem(ACTIVE_ORGANISATION_KEY) ? { 'X-Organisation-Id': localStorage.getItem(ACTIVE_ORGANISATION_KEY)! } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -65,6 +75,7 @@ export const auth = {
   },
   async signOut() {
     localStorage.removeItem('bidwatch-auth-present');
+    localStorage.removeItem(ACTIVE_ORGANISATION_KEY);
     await supabase.auth.signOut();
   },
 };
