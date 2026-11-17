@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.server.json --noEmit",
-    "test": "node scripts/verify-repo.mjs",
+    "test": "node --import tsx --test tests/scoped-records.test.ts && node scripts/verify-repo.mjs",
     "start": "tsx server.ts"
   },
   "dependencies": {
