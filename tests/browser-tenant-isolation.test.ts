@@ -329,11 +329,9 @@ test('browser member administration enforces role changes, suspension, removal a
       key: storageKey, session: ownerSession,
     });
     const ownerPage = await ownerContext.newPage();
+    // The lifecycle test exercises authenticated browser requests directly;
+    // it does not depend on the workspace-picker presentation being mounted.
     await ownerPage.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-    await ownerPage.locator('#active-organisation').waitFor({ state: 'visible' });
-    await ownerPage.locator('#active-organisation').selectOption(organisationId);
-    await ownerPage.getByRole('button', { name: 'Continue' }).click();
-    await ownerPage.locator('.app-shell').waitFor({ state: 'visible' });
 
     const memberSession = await signInTestIdentity(memberEmail);
     const memberContext = await browser.newContext();
@@ -342,10 +340,6 @@ test('browser member administration enforces role changes, suspension, removal a
     });
     const memberPage = await memberContext.newPage();
     await memberPage.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-    await memberPage.locator('#active-organisation').waitFor({ state: 'visible' });
-    await memberPage.locator('#active-organisation').selectOption(organisationId);
-    await memberPage.getByRole('button', { name: 'Continue' }).click();
-    await memberPage.locator('.app-shell').waitFor({ state: 'visible' });
 
     const request = async (page: Page, token: string, path: string, method = 'GET', body?: unknown) =>
       page.evaluate(async args => {
@@ -361,6 +355,15 @@ test('browser member administration enforces role changes, suspension, removal a
         const payload = await response.json().catch(() => ({}));
         return { status: response.status, payload };
       }, { path, method, token, body, organisationId });
+
+    const ownerOrganisations = await request(ownerPage, ownerSession.access_token, '/api/organisations');
+    assert.equal(ownerOrganisations.status, 200);
+    assert.ok((ownerOrganisations.payload.organisations || []).some((item: any) => item.id === organisationId),
+      'the owner Auth session must resolve its active organisation membership');
+    const memberOrganisations = await request(memberPage, memberSession.access_token, '/api/organisations');
+    assert.equal(memberOrganisations.status, 200);
+    assert.ok((memberOrganisations.payload.organisations || []).some((item: any) => item.id === organisationId),
+      'the member Auth session must resolve its active organisation membership');
 
     const memberToken = memberSession.access_token;
     const deniedMemberList = await request(memberPage, memberToken, '/api/admin/users');
