@@ -627,7 +627,7 @@ export const handler = router({
       if (removeError) throw new Error(removeError.message);
       await securityLog(ctx, 'member.removed', member.user_id, `Previous status: ${member.status}`);
       return json({ ok: true });
-    }}],
+    }],
     'GET /api/admin/roles': [requireAuth(), requireOrganisation(), async ctx => { if (!ctx.organisation?.permissions.includes('roles.view') && !ctx.organisation?.permissions.includes('users.manage')) return error('You do not have permission to view organisation roles.', 403); return json({ roles: await listCurrentOrganisationRoles(ctx), permissions: PERMISSIONS }); }],
       'POST /api/admin/roles': [requireAuth(), requireOrganisation(), requirePermission('roles.manage'), async ctx => {
     if (!ctx.organisation || !supabaseAdmin) return error('Organisation context is unavailable.', 503);
