@@ -17,7 +17,7 @@ export type RouterContext = {
   body: unknown;
   params: Record<string, string>;
   query: Record<string, unknown>;
-  user?: { userId: string; email: string; name: string };
+  user?: { userId: string; email: string; name: string; emailVerified: boolean };
   organisation?: { id: string; slug: string; name: string; membershipId: string; roleId: string; roleKey: string; roleName: string; permissions: string[]; isPlatformAdmin: boolean };
   req: Request;
   res: Response;
@@ -81,7 +81,7 @@ export function requireAuth() {
     if (authError || !data.user) return error('Authentication required.', 401);
     const email = String(data.user.email || '').toLowerCase();
     const name = String(data.user.user_metadata?.full_name || data.user.user_metadata?.name || email.split('@')[0] || 'User');
-    ctx.user = { userId: data.user.id, email, name };
+    ctx.user = { userId: data.user.id, email, name, emailVerified: Boolean(data.user.email_confirmed_at || data.user.confirmed_at) };
   };
 }
 
