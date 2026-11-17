@@ -46,7 +46,13 @@ export function createScopedRecordRepository(
     throw new Error(`Collection "${table}" is not registered for scoped access.`);
   }
 
-  async function checked<T>(result: { data: T | null; error: { message: string } | null }) {
+  async function checked<T>(
+    pending: PromiseLike<{ data: T | null; error: { message: string } | null }> |
+      { data: T | null; error: { message: string } | null },
+  ) {
+    // Supabase query builders are PromiseLike. Await them here rather than
+    // reading their data/error fields before the request has executed.
+    const result = await pending;
     if (result.error) throw new Error(result.error.message);
     return result.data as T;
   }
