@@ -120,7 +120,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
   async function authenticatedContext(userId: string, organisationId?: string): Promise<Context> {
     const token = tokens.get(userId);
     assert.ok(token);
-    const ctx = {
+    const ctx: Context = {
       body: {},
       params: {},
       query: {},
