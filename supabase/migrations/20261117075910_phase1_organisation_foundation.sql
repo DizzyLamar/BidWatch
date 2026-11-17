@@ -99,7 +99,7 @@ begin
     end if;
   end if;
 end;
-$;
+$$;
 
 create table public.organisations (
   id uuid primary key default gen_random_uuid(),
