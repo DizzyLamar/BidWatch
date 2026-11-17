@@ -548,8 +548,10 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       assert.ok(tendersB.tenders.some(item => item.id === tenderB && item.title === 'Private tender belonging to B'));
       assert.ok(tendersB.tenders.every(item => item.id !== tenderA), 'B must never receive A\'s tender through the HTTP API');
 
-      const forged = await apiRequest(userB, orgA, '/api/tenders');
-      assert.equal(forged.status, 403, 'a real HTTP request cannot switch tenants by forging the organisation header');
+      // userB legitimately belongs to both organisations after the member-lifecycle
+      // test. Use userA, who belongs only to orgA, to test a forged switch to orgB.
+      const forged = await apiRequest(userA, orgB, '/api/tenders');
+      assert.equal(forged.status, 403, 'a real HTTP request cannot switch to an organisation without membership');
     });
 
     await t.test('attachment upload, signed URL, cross-tenant denial and deletion work end to end', async () => {
