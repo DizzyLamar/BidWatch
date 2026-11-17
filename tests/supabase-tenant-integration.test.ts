@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import type { Request, Response } from 'express';
 import type { DatabaseScope } from '../backend/scoped-records';
 
@@ -31,6 +31,12 @@ type Context = {
 };
 
 test('local Supabase Auth and PostgREST enforce real organisation boundaries', { skip: !enabled }, async t => {
+  const configuredHost = new URL(supabaseUrl!).hostname;
+  assert.ok(
+    configuredHost === '127.0.0.1' || configuredHost === 'localhost' || configuredHost === '::1',
+    'Integration tests are restricted to localhost; refusing to create test data on a remote Supabase project.',
+  );
+
   const admin = createClient(supabaseUrl!, serviceKey!, {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
