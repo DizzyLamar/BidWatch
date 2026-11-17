@@ -16,6 +16,7 @@ export type RouterContext = {
   params: Record<string, string>;
   query: Record<string, unknown>;
   user?: { userId: string; email: string; name: string };
+  organisation?: { id: string; slug: string; name: string; membershipId: string; roleId: string; roleKey: string; roleName: string; permissions: string[]; isPlatformAdmin: boolean };
   req: Request;
   res: Response;
 };
