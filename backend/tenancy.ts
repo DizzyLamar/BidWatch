@@ -145,7 +145,9 @@ export function createRequireOrganisationMiddleware(
 ) {
   return async (ctx: RouterContext) => {
     if (!ctx.user) return error('Authentication required.', 401);
-    let organisationId = String(ctx.req.headers['x-organisation-id'] || '').trim();
+    // Express' case-insensitive getter is the canonical way to read request headers.
+    // Keep the raw Node header as a fallback for lightweight middleware test contexts.
+    let organisationId = String(ctx.req.get?.('x-organisation-id') || ctx.req.headers['x-organisation-id'] || '').trim();
     const db = database;
     if (!organisationId) {
       // A single active membership is an explicit, deterministic default.
