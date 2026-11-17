@@ -631,7 +631,7 @@ export const handler = router({
     }],
     'GET /api/admin/roles': [requireAuth(), requireOrganisation(), async ctx => { if (!ctx.organisation?.permissions.includes('roles.view') && !ctx.organisation?.permissions.includes('users.manage')) return error('You do not have permission to view organisation roles.', 403); return json({ roles: await listCurrentOrganisationRoles(ctx), permissions: PERMISSIONS }); }],
       'POST /api/admin/roles': [requireAuth(), requireOrganisation(), requirePermission('roles.manage'), async ctx => {
-    if (!ctx.organisation || !adminClient) return error('Organisation context is unavailable.', 503);
+    if (!ctx.organisation || !supabaseAdmin) return error('Organisation context is unavailable.', 503);
     const body = ctx.body as Record<string, unknown>;
     const name = text(body.name, 'title');
     const description = text(body.description, 'description');
@@ -648,7 +648,7 @@ export const handler = router({
     if (existing.some(role => role.name.toLowerCase() === name.toLowerCase() || role.key === key)) {
       return error('A role with that name already exists.', 409);
     }
-    const { data, error: insertError } = await adminClient.from('organisation_roles')
+    const { data, error: insertError } = await supabaseAdmin.from('organisation_roles')
       .insert({ organisation_id: ctx.organisation.id, key, name, description, permissions, is_system: false })
       .select('id,key,name,description,permissions,is_system').single();
     if (insertError) throw new Error(insertError.message);
