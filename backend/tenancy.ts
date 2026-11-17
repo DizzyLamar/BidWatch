@@ -204,7 +204,7 @@ export function requireOrganisation() {
       permissions,
       isPlatformAdmin: Boolean(platformAdmin),
     };
-    setDatabaseScope({ kind: 'organisation', organisationId: organisation.id });
+    setDatabaseScope({ kind: 'organisation', organisationId: organisation.id, legacyStorage: organisation.slug === 'legacy-bidwatch-workspace' });
   };
 }
 
@@ -217,7 +217,7 @@ export function requireLegacyOrganisation() {
       return error('Could not resolve the scheduled workspace.', 503);
     }
     if (!data || data.status !== 'active') return error('The scheduled workspace is unavailable.', 503);
-    setDatabaseScope({ kind: 'organisation', organisationId: data.id });
+    setDatabaseScope({ kind: 'organisation', organisationId: data.id, legacyStorage: true });
   };
 }
 
