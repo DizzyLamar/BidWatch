@@ -80,7 +80,11 @@ if (!backend.includes('listCurrentOrganisationRoles(ctx)')) failures.push('Organ
 if (!backend.includes('activeOrganisationProfileIds(ctx)')) failures.push('Tender assignments are not restricted to active organisation members.');
 if (!backend.includes('requireLegacyOrganisation()')) failures.push('Scheduled jobs do not have an explicit tenant execution scope.');
 if (!backend.includes("eq('status', 'active')")) failures.push('Scheduled reminders do not verify active organisation memberships.');
-if (!backend.includes("Member invitations are temporarily unavailable")) failures.push('Legacy global identity provisioning has not been disabled during the membership cutover.');
+if (!backend.includes('inviteUserByEmail')) failures.push('New organisation members are not invited through the trusted Auth Admin API.');
+if (!backend.includes("eq('status', 'invited')")) failures.push('Pending organisation invitations are not restricted to their invited Auth identity.');
+if (!backend.includes("status: 'removed'")) failures.push('Member removal is not represented as a workspace-scoped soft removal.');
+if (!backend.includes('last active organisation owner')) failures.push('The last active organisation owner is not protected from removal or demotion.');
+if (!backend.includes('member.user_id === ctx.user.userId')) failures.push('Members are not protected from suspending or removing their own access.');
 if (!backend.includes("from('organisation_roles')")) failures.push('Organisation role management is not backed by relational roles.');
 if (!backend.includes('Only a platform administrator can allocate sensitive permissions.')) failures.push('Sensitive role permissions are not protected by platform-admin authorization.');
 if (!backend.includes("This role is assigned to organisation members.")) failures.push('Assigned organisation roles are not protected from deletion.');
