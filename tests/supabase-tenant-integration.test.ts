@@ -536,6 +536,10 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
         [orgA, orgB].sort(),
       );
 
+      const platformStorage = await apiRequest(userA, orgA, '/api/admin/storage');
+      assert.equal(platformStorage.status, 200,
+        'a platform administrator can inspect storage without the organisation settings.manage permission');
+
       const responseA = await apiRequest(userA, orgA, '/api/tenders');
       assert.equal(responseA.status, 200);
       const tendersA = await responseA.json() as { tenders: Array<{ id: string; title: string }> };
