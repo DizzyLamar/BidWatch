@@ -56,7 +56,7 @@ jobs:
         run: npm ci
 
       - name: Start local Supabase (Auth, PostgREST, Database and Storage)
-        run: npx supabase start --exclude realtime,imgproxy,studio,mailpit,edge-runtime,analytics,vector,supavisor
+        run: npx supabase start --exclude realtime,imgproxy,studio,edge-runtime,analytics,vector,supavisor
 
       - name: Run real Auth and PostgREST integration tests
         shell: bash
