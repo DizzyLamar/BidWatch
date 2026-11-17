@@ -464,11 +464,11 @@ export const handler = router({
     const body = ctx.body as Record<string, unknown>;
     const name = text(body.name, 'title');
     const description = text(body.description, 'description');
-    const suppliedPermissions = Array.isArray(body.permissions) ? body.permissions : [];
-    const permissions = suppliedPermissions.filter((value): value is Permission => PERMISSIONS.some(item => item.key === value));
+    const suppliedPermissions: unknown[] = Array.isArray(body.permissions) ? body.permissions : [];
+    const permissions: Permission[] = suppliedPermissions.filter((value: unknown): value is Permission => PERMISSIONS.some(item => item.key === value));
     if (!name) return error('Role name is required.', 400);
     if (permissions.length !== suppliedPermissions.length) return error('One or more permissions are invalid.', 400);
-    if (!ctx.organisation.isPlatformAdmin && permissions.some(permission => SENSITIVE_PERMISSIONS.includes(permission))) {
+    if (!ctx.organisation.isPlatformAdmin && permissions.some((permission: Permission) => SENSITIVE_PERMISSIONS.includes(permission))) {
       return error('Only a platform administrator can allocate sensitive permissions.', 403);
     }
     const key = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -495,8 +495,8 @@ export const handler = router({
     const body = ctx.body as Record<string, unknown>;
     const name = body.name === undefined ? old.name : text(body.name, 'title');
     const description = body.description === undefined ? old.description || '' : text(body.description, 'description');
-    const suppliedPermissions = body.permissions === undefined ? old.permissions || [] : Array.isArray(body.permissions) ? body.permissions : [];
-    const permissions = suppliedPermissions.filter((value): value is Permission => PERMISSIONS.some(item => item.key === value));
+    const suppliedPermissions: unknown[] = body.permissions === undefined ? (Array.isArray(old.permissions) ? old.permissions : []) : Array.isArray(body.permissions) ? body.permissions : [];
+    const permissions: Permission[] = suppliedPermissions.filter((value: unknown): value is Permission => PERMISSIONS.some(item => item.key === value));
     if (!name) return error('Role name is required.', 400);
     if (permissions.length !== suppliedPermissions.length) return error('One or more permissions are invalid.', 400);
     if (!ctx.organisation.isPlatformAdmin && permissions.some(permission => SENSITIVE_PERMISSIONS.includes(permission))) {
