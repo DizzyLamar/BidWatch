@@ -284,7 +284,7 @@ export default function App() {
           const adminUsers = await cachedGet('/api/admin/users', 30000);
           setUsers(adminUsers.data.users);
         }
-        if (me.data.user.permissions?.includes('roles.view') || me.data.user.permissions?.includes('users.manage')) {
+        if (me.data.user.permissions?.includes('roles.view') || me.data.user.permissions?.includes('roles.manage') || me.data.user.permissions?.includes('users.manage')) {
           const access = (await cachedGet('/api/admin/roles', 30000)).data;
           setRoles(access.roles);
           setPermissionMeta(access.permissions);
@@ -648,20 +648,18 @@ export default function App() {
                 }}
               />
             )}
-            {(profile.permissions?.includes('users.view') || profile.permissions?.includes('users.manage') || profile.permissions?.includes('roles.view') || profile.permissions?.includes('categories.manage')) && (
+            {(profile.isPlatformAdmin || ['users.view', 'users.manage', 'roles.view', 'roles.manage', 'categories.manage', 'settings.manage'].some(permission => profile.permissions?.includes(permission))) && (
               <>
                 <div className="nav-label">Access & configuration</div>
-                {(profile.permissions?.includes('users.view') || profile.permissions?.includes('roles.view')) && (
-                  <NavItem
-                    icon={<Shield size={18} />}
-                    label="Administration"
-                    active={view === 'admin'}
-                    onClick={() => {
-                      navigate('admin/users');
-                      setMobileNav(false);
-                    }}
-                  />
-                )}
+                <NavItem
+                  icon={<Shield size={18} />}
+                  label="Administration"
+                  active={view === 'admin'}
+                  onClick={() => {
+                    navigate('admin/users');
+                    setMobileNav(false);
+                  }}
+                />
               </>
             )}
           </nav>
@@ -735,13 +733,13 @@ export default function App() {
               }}
             />
           )}
-          {view === 'profile' && <ProfileView profile={profile} onSaved={async () => { await refresh(); }} setNotice={showNotice} />} {view === 'settings' && <SettingsView setNotice={showNotice} />} {view === 'about' && <AboutView />} {view === 'admin' && (profile.permissions?.includes('users.view') || profile.permissions?.includes('roles.view')) && (
+          {view === 'profile' && <ProfileView profile={profile} onSaved={async () => { await refresh(); }} setNotice={showNotice} />} {view === 'settings' && <SettingsView setNotice={showNotice} />} {view === 'about' && <AboutView />} {view === 'admin' && (profile.isPlatformAdmin || ['users.view', 'users.manage', 'roles.view', 'roles.manage', 'categories.manage', 'settings.manage'].some(permission => profile.permissions?.includes(permission))) && (
             <Suspense fallback={<div className="panel" aria-live="polite">Loading administration…</div>}>
               <AdminPanel
                 users={users}
               roles={roles}
               permissions={permissionMeta}
-              profile={{ email: profile.email, role: profile.role, permissions: profile.permissions || [] }}
+              profile={{ email: profile.email, role: profile.role, permissions: profile.permissions || [], isPlatformAdmin: profile.isPlatformAdmin }}
               categories={categoryRecords}
               initialTab={adminTab as any}
               onTabChange={(tab) => navigate(`admin/${tab}`)}
