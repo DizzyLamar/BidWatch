@@ -71,14 +71,16 @@ for (const line of routeLines) {
   if (line.includes('requireAuth()') && !line.includes('requireOrganisation()') && !line.includes("'GET /api/organisations'")) {
     failures.push('An authenticated API route is missing organisation membership middleware.');
   }
-  if (line.includes('/api/internal/') && !line.includes('requireLegacyOrganisation()')) {
-    failures.push('An internal scheduled route is missing its explicit legacy workspace scope.');
+  if (line.includes('/api/internal/') && !line.includes('validCronSecret(ctx)')) {
+    failures.push('An internal scheduled route is missing its cron-secret authorization.');
   }
 }
 if (!backend.includes('listCurrentOrganisationMembers(ctx)')) failures.push('Organisation member administration is not membership-scoped.');
 if (!backend.includes('listCurrentOrganisationRoles(ctx)')) failures.push('Organisation role reads are not relational and tenant-scoped.');
 if (!backend.includes('activeOrganisationProfileIds(ctx)')) failures.push('Tender assignments are not restricted to active organisation members.');
-if (!backend.includes('requireLegacyOrganisation()')) failures.push('Scheduled jobs do not have an explicit tenant execution scope.');
+if (!backend.includes('listActiveOrganisations()')) failures.push('Scheduled jobs do not enumerate active organisations.');
+if (!backend.includes('withDatabaseScope')) failures.push('Scheduled jobs do not establish isolated organisation database scopes.');
+if (!backend.includes("withDatabaseScope({ kind: 'global' }")) failures.push('Scheduled source-run telemetry is not written in global scope.');
 if (!backend.includes("eq('status', 'active')")) failures.push('Scheduled reminders do not verify active organisation memberships.');
 if (!backend.includes('inviteUserByEmail')) failures.push('New organisation members are not invited through the trusted Auth Admin API.');
 if (!backend.includes("eq('status', 'invited')")) failures.push('Pending organisation invitations are not restricted to their invited Auth identity.');
