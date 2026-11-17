@@ -181,15 +181,25 @@ async function listCurrentOrganisationMembers(ctx: RouterContext) {
   return (memberships || []).map(member => {
     const profile = users.find(user => user.userId === member.user_id);
     const role = roles.get(member.role_id);
-    return { id: profile?.id || member.id, membershipId: member.id, userId: member.user_id,
-      email: profile?.email || '', name: profile?.name || '', roleId: member.role_id,
-      role: role?.name || 'Unknown role', active: member.status === 'active',
-      status: member.status === 'active' ? 'Active' : member.status === 'invited' ? 'Provisioned' : 'Suspended',
-      membershipStatus: member.status, joinedAt: member.joined_at };
+    const status = member.status === 'active' ? 'Active'
+      : member.status === 'invited' ? 'Provisioned'
+      : member.status === 'removed' ? 'Removed' : 'Suspended';
+    return { id: member.id, membershipId: member.id, userId: member.user_id,
+      profileId: profile?.id || null, email: profile?.email || '', name: profile?.name || '',
+      roleId: member.role_id, role: role?.name || 'Unknown role', active: member.status === 'active',
+      status, membershipStatus: member.status, joinedAt: member.joined_at };
   });
 }
 async function listUserOrganisations(ctx: RouterContext) {
   if (!ctx.user || !supabaseAdmin) throw new Error('Authentication context is unavailable.');
+  // Signing in with a verified identity is the acceptance step for an email invitation.
+  // Supabase automatically links verified OAuth identities with the same email.
+  if (ctx.user.emailVerified) {
+    const { error: acceptError } = await supabaseAdmin.from('organisation_members')
+      .update({ status: 'active', joined_at: now(), updated_at: now() })
+      .eq('user_id', ctx.user.userId).eq('status', 'invited');
+    if (acceptError) throw new Error(acceptError.message);
+  }
   const { data: memberships, error: membershipError } = await supabaseAdmin.from('organisation_members')
     .select('id,organisation_id,role_id,status').eq('user_id', ctx.user.userId).eq('status', 'active');
   if (membershipError) throw new Error(membershipError.message);
@@ -456,8 +466,162 @@ export const handler = router({
   'GET /api/notifications': [requireAuth(), requireOrganisation(),requirePermission('notifications.view'), async ctx => { const n = await listAll<{ userId: string; title: string; body: string; read: boolean; createdAt: string }>('notifications'); return json({ notifications: n.filter(x => x.userId === ctx.user!.userId).sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime()) }); }],
   'POST /api/notifications/:id/read': [requireAuth(), requireOrganisation(),requirePermission('notifications.view'), async ctx => { const n = await getById<{ userId: string; read: boolean }> ('notifications', ctx.params.id); if (!n || n.userId !== ctx.user!.userId) return error('Notification not found.', 404); await db.update('notifications', [{ id: n.id, record: { ...n, read: true } }]); return json({ ok: true }); }], 'POST /api/notifications/read-all': [requireAuth(), requireOrganisation(),requirePermission('notifications.view'), async ctx => { const notes = await listAll<{ userId: string; read: boolean }>('notifications'); const mine = notes.filter(n => n.userId === ctx.user!.userId && !n.read); if (mine.length) await db.update('notifications', mine.map(n => ({ id: n.id, record: { ...n, read: true } }))); return json({ ok: true }); }], 'DELETE /api/notifications': [requireAuth(), requireOrganisation(),requirePermission('notifications.view'), async ctx => { const notes = await listAll<{ userId: string }>('notifications'); const mine = notes.filter(n => n.userId === ctx.user!.userId); if (mine.length) await db.delete('notifications', mine.map(n => n.id)); return json({ ok: true }); }],
     'GET /api/admin/users': [requireAuth(), requireOrganisation(), requirePermission('users.view'), async ctx => json({ users: await listCurrentOrganisationMembers(ctx) })],
-    'POST /api/admin/users': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async () => error('Member invitations are temporarily unavailable while organisation membership management is being migrated.', 409)],
-    'PUT /api/admin/users/:id': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async () => error('Member access changes are temporarily unavailable while organisation membership management is being migrated.', 409)],
+    'POST /api/admin/users': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async ctx => {
+      if (!ctx.organisation || !supabaseAdmin || !ctx.user) return error('Organisation context is unavailable.', 503);
+      const body = ctx.body as Record<string, unknown>;
+      const email = text(body.email, 'source').toLowerCase();
+      const name = text(body.name, 'title');
+      const roleId = text(body.roleId, 'reference');
+      if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email.length > 254) return error('Enter a valid email address.', 400);
+      if (!roleId) return error('Select an organisation role.', 400);
+
+      const { data: role, error: roleError } = await supabaseAdmin.from('organisation_roles')
+        .select('id,key,permissions').eq('organisation_id', ctx.organisation.id).eq('id', roleId).maybeSingle();
+      if (roleError) throw new Error(roleError.message);
+      if (!role) return error('The selected role does not belong to this organisation.', 400);
+      const rolePermissions = Array.isArray(role.permissions) ? role.permissions : [];
+      if (!ctx.organisation.isPlatformAdmin && rolePermissions.some((permission: string) => SENSITIVE_PERMISSIONS.includes(permission as Permission))) {
+        return error('Only a platform administrator can assign a role containing sensitive permissions.', 403);
+      }
+
+      const profiles = await listAll<User>('users');
+      const existingProfile = profiles.find(user => user.email.toLowerCase() === email);
+      let authUserId = existingProfile?.userId || '';
+      let createdAuthUser = false;
+      if (authUserId) {
+        const { data: identity, error: identityError } = await supabaseAdmin.auth.admin.getUserById(authUserId);
+        if (identityError || !identity?.user) return error('The existing BidWatch profile has no valid Auth identity. Contact support.', 409);
+      } else {
+        const { data: invited, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+          data: { full_name: name || email.split('@')[0], name: name || email.split('@')[0] },
+        });
+        if (inviteError || !invited.user) {
+          return error(inviteError?.message || 'Supabase did not create the invited identity.', 409);
+        }
+        authUserId = invited.user.id;
+        createdAuthUser = true;
+        const profileRecord = {
+          userId: authUserId, email, name: name || email.split('@')[0], roleId,
+          active: true, status: 'Active', createdAt: now(), updatedAt: now(), onboardingCompleted: false,
+        };
+        const { error: profileError } = await supabaseAdmin.from('app_records').insert({
+          table_name: 'users', record: profileRecord, scope_type: 'global', organisation_id: null,
+        });
+        if (profileError) {
+          await supabaseAdmin.auth.admin.deleteUser(authUserId);
+          throw new Error('The invitation identity was created but its BidWatch profile could not be saved.');
+        }
+      }
+
+      const { data: existingMembership, error: membershipLookupError } = await supabaseAdmin.from('organisation_members')
+        .select('id,status').eq('organisation_id', ctx.organisation.id).eq('user_id', authUserId).maybeSingle();
+      if (membershipLookupError) throw new Error(membershipLookupError.message);
+      if (existingMembership && existingMembership.status !== 'removed') {
+        if (createdAuthUser) {
+          await supabaseAdmin.from('app_records').delete().eq('table_name', 'users').contains('record', { userId: authUserId });
+          await supabaseAdmin.auth.admin.deleteUser(authUserId);
+        }
+        return error('This person already has a membership in this organisation.', 409);
+      }
+
+      const membershipStatus = createdAuthUser ? 'invited' : 'active';
+      const membershipWrite = existingMembership
+        ? await supabaseAdmin.from('organisation_members').update({
+            role_id: roleId, status: membershipStatus,
+            joined_at: membershipStatus === 'active' ? now() : null, updated_at: now(),
+          }).eq('organisation_id', ctx.organisation.id).eq('id', existingMembership.id)
+        : await supabaseAdmin.from('organisation_members').insert({
+            organisation_id: ctx.organisation.id, user_id: authUserId, role_id: roleId,
+            status: membershipStatus, joined_at: membershipStatus === 'active' ? now() : null,
+          });
+      if (membershipWrite.error) {
+        if (createdAuthUser) {
+          await supabaseAdmin.from('app_records').delete().eq('table_name', 'users').contains('record', { userId: authUserId });
+          await supabaseAdmin.auth.admin.deleteUser(authUserId);
+        }
+        throw new Error(membershipWrite.error.message);
+      }
+      await securityLog(ctx, 'member.invited', email, `Role: ${role.key}; status: ${membershipStatus}`);
+      return json({ ok: true, status: membershipStatus, email }, 201);
+    }],
+    'PUT /api/admin/users/:id': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async ctx => {
+      if (!ctx.organisation || !supabaseAdmin || !ctx.user) return error('Organisation context is unavailable.', 503);
+      const body = ctx.body as Record<string, unknown>;
+      const { data: member, error: memberError } = await supabaseAdmin.from('organisation_members')
+        .select('id,user_id,role_id,status').eq('organisation_id', ctx.organisation.id).eq('id', ctx.params.id).maybeSingle();
+      if (memberError) throw new Error(memberError.message);
+      if (!member) return error('Organisation membership not found.', 404);
+
+      const nextStatus = body.status === undefined
+        ? (body.active === undefined ? member.status : body.active ? 'active' : 'suspended')
+        : String(body.status);
+      if (!['active', 'suspended'].includes(nextStatus) && nextStatus !== member.status) {
+        return error('Membership status must be Active or Suspended. Remove access using the dedicated remove action.', 400);
+      }
+      const nextRoleId = body.roleId === undefined ? member.role_id : text(body.roleId, 'reference');
+      if (body.roleId !== undefined) {
+        const { data: role, error: roleError } = await supabaseAdmin.from('organisation_roles')
+          .select('id,key,permissions').eq('organisation_id', ctx.organisation.id).eq('id', nextRoleId).maybeSingle();
+        if (roleError) throw new Error(roleError.message);
+        if (!role) return error('The selected role does not belong to this organisation.', 400);
+        const rolePermissions = Array.isArray(role.permissions) ? role.permissions : [];
+        if (!ctx.organisation.isPlatformAdmin && rolePermissions.some((permission: string) => SENSITIVE_PERMISSIONS.includes(permission as Permission))) {
+          return error('Only a platform administrator can assign a role containing sensitive permissions.', 403);
+        }
+      }
+      const changesAccess = nextStatus !== member.status || nextRoleId !== member.role_id;
+      if (member.user_id === ctx.user.userId && nextStatus !== 'active') {
+        return error('You cannot suspend your own organisation access.', 409);
+      }
+      if (changesAccess) {
+        const { data: ownerRoleRows, error: ownerRoleError } = await supabaseAdmin.from('organisation_roles')
+          .select('id').eq('organisation_id', ctx.organisation.id).eq('key', 'owner');
+        if (ownerRoleError) throw new Error(ownerRoleError.message);
+        const ownerIds = (ownerRoleRows || []).map(row => row.id);
+        if (member.status === 'active' && ownerIds.includes(member.role_id)
+          && (nextStatus !== 'active' || !ownerIds.includes(nextRoleId))) {
+          const { count, error: ownerCountError } = await supabaseAdmin.from('organisation_members')
+            .select('id', { count: 'exact', head: true }).eq('organisation_id', ctx.organisation.id)
+            .eq('status', 'active').in('role_id', ownerIds);
+          if (ownerCountError) throw new Error(ownerCountError.message);
+          if ((count || 0) <= 1) return error('The last active organisation owner cannot be demoted or suspended.', 409);
+        }
+      }
+      const update: Record<string, unknown> = { role_id: nextRoleId, status: nextStatus, updated_at: now() };
+      if (nextStatus === 'active' && !member.status) update.joined_at = now();
+      const { error: updateError } = await supabaseAdmin.from('organisation_members')
+        .update(update).eq('organisation_id', ctx.organisation.id).eq('id', member.id);
+      if (updateError) throw new Error(updateError.message);
+      await securityLog(ctx, nextRoleId !== member.role_id ? 'member.role_changed' : 'member.status_changed',
+        member.user_id, `Role: ${nextRoleId}; status: ${nextStatus}`);
+      return json({ ok: true, status: nextStatus, roleId: nextRoleId });
+    }],
+    'DELETE /api/admin/users/:id': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async ctx => {
+      if (!ctx.organisation || !supabaseAdmin || !ctx.user) return error('Organisation context is unavailable.', 503);
+      const { data: member, error: memberError } = await supabaseAdmin.from('organisation_members')
+        .select('id,user_id,role_id,status').eq('organisation_id', ctx.organisation.id).eq('id', ctx.params.id).maybeSingle();
+      if (memberError) throw new Error(memberError.message);
+      if (!member) return error('Organisation membership not found.', 404);
+      if (member.user_id === ctx.user.userId) return error('You cannot remove your own organisation membership.', 409);
+      if (member.status === 'active') {
+        const { data: ownerRoles, error: ownerRoleError } = await supabaseAdmin.from('organisation_roles')
+          .select('id').eq('organisation_id', ctx.organisation.id).eq('key', 'owner');
+        if (ownerRoleError) throw new Error(ownerRoleError.message);
+        const ownerIds = (ownerRoles || []).map(row => row.id);
+        if (ownerIds.includes(member.role_id)) {
+          const { count, error: countError } = await supabaseAdmin.from('organisation_members')
+            .select('id', { count: 'exact', head: true }).eq('organisation_id', ctx.organisation.id)
+            .eq('status', 'active').in('role_id', ownerIds);
+          if (countError) throw new Error(countError.message);
+          if ((count || 0) <= 1) return error('The last active organisation owner cannot be removed.', 409);
+        }
+      }
+      const { error: removeError } = await supabaseAdmin.from('organisation_members')
+        .update({ status: 'removed', updated_at: now() }).eq('organisation_id', ctx.organisation.id).eq('id', member.id);
+      if (removeError) throw new Error(removeError.message);
+      await securityLog(ctx, 'member.removed', member.user_id, `Previous status: ${member.status}`);
+      return json({ ok: true });
+    }}],
     'GET /api/admin/roles': [requireAuth(), requireOrganisation(), requirePermission('roles.view'), async ctx => json({ roles: await listCurrentOrganisationRoles(ctx), permissions: PERMISSIONS })],
       'POST /api/admin/roles': [requireAuth(), requireOrganisation(), requirePermission('roles.manage'), async ctx => {
     if (!ctx.organisation || !supabaseAdmin) return error('Organisation context is unavailable.', 503);
