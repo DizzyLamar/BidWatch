@@ -85,7 +85,7 @@ export function requireAuth() {
 }
 
 type RecordRow = { id: string; table_name: string; record: Record<string, unknown> };
-type DatabaseScope = { kind: 'global' } | { kind: 'organisation'; organisationId: string };
+type DatabaseScope = { kind: 'global' } | { kind: 'organisation'; organisationId: string; legacyStorage?: boolean };
 const databaseScopeStorage = new AsyncLocalStorage<{ scope: DatabaseScope | null }>();
 const GLOBAL_COLLECTIONS = new Set(['users', 'opportunity_source_runs']);
 const ORGANISATION_COLLECTIONS = new Set([
@@ -120,6 +120,19 @@ async function checked<T>(result: { data: T | null; error: any }) {
   if (!supabase) throw new Error('Supabase is not configured.');
   if (result.error) throw new Error(result.error.message);
   return result.data as T;
+}
+
+function assertStoragePath(path: string, allowLegacy = true) {
+  const scope = databaseScopeStorage.getStore()?.scope;
+  if (!scope || scope.kind !== 'organisation') throw new Error('An organisation context is required for storage access.');
+  if (!path || path.startsWith('/') || path.includes('\\\\') || path.split('/').some(part => part === '..' || part === '.')) {
+    throw new Error('The storage path is invalid.');
+  }
+  const organisationPrefix = `organisations/${scope.organisationId}/`;
+  const legacyPrefixAllowed = allowLegacy && scope.legacyStorage === true && path.startsWith('tenders/');
+  if (!path.startsWith(organisationPrefix) && !legacyPrefixAllowed) {
+    throw new Error('The storage path is outside the active organisation.');
+  }
 }
 
 export const db = {
@@ -188,6 +201,7 @@ export const db = {
 
 export const storageService = {
   async put(path: string, content: string, contentType: string) {
+    assertStoragePath(path, false);
     if (!supabase) throw new Error('Supabase is not configured.');
     const result = await supabase!.storage.from(STORAGE_BUCKET).upload(path, Buffer.from(content, 'base64'), {
       contentType, upsert: false,
@@ -195,12 +209,14 @@ export const storageService = {
     return !result.error;
   },
   async getUrl(path: string) {
+    assertStoragePath(path);
     if (!supabase) throw new Error('Supabase is not configured.');
     const result = await supabase!.storage.from(STORAGE_BUCKET).createSignedUrl(path, 3600);
     if (result.error || !result.data?.signedUrl) throw new Error(result.error?.message || 'Could not create file URL.');
     return result.data.signedUrl;
   },
   async delete(paths: string[]) {
+    paths.forEach(path => assertStoragePath(path));
     if (!supabase) return paths.map(() => false);
     if (!paths.length) return [];
     const result = await supabase!.storage.from(STORAGE_BUCKET).remove(paths);
@@ -208,6 +224,7 @@ export const storageService = {
     return paths.map(() => true);
   },
   async listAll(prefix: string, maxFiles: number) {
+    assertStoragePath(prefix);
     if (!supabase) throw new Error('Supabase is not configured.');
     const root = prefix.replace(/^\/+|\/+$/g, '');
     const paths: string[] = [];
