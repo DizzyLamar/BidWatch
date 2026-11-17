@@ -472,7 +472,7 @@ export const handler = router({
       const email = String(body.email || '').trim().toLowerCase();
       const name = text(body.name, 'title');
       const roleId = text(body.roleId, 'reference');
-      if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email.length > 254) return error('Enter a valid email address.', 400);
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return error('Enter a valid email address.', 400);
       if (!roleId) return error('Select an organisation role.', 400);
 
       const { data: role, error: roleError } = await supabaseAdmin.from('organisation_roles')
