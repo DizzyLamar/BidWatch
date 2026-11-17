@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.server.json --noEmit",
     "test": "node --import tsx --test tests/scoped-records.test.ts tests/tenancy-middleware.test.ts && node scripts/verify-repo.mjs",
-    "start": "tsx server.ts"
+    "start": "tsx server.ts",
+    "test:integration": "node --import tsx --test tests/supabase-tenant-integration.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
