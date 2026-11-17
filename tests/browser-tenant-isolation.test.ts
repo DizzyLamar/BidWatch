@@ -189,6 +189,13 @@ test('browser workspace switching isolates two users and rejects a forged tenant
       }
     });
     await pageA.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    const authProbe = await pageA.evaluate(async ({ url, key, token }) => {
+      const response = await fetch(url + '/auth/v1/user', {
+        headers: { apikey: key, Authorization: 'Bearer ' + token },
+      });
+      return { status: response.status, body: (await response.text()).slice(0, 500) };
+    }, { url: supabaseUrl, key: anonKey, token: sessionA.session.access_token });
+    console.log('[browser A auth probe]', JSON.stringify(authProbe));
     try {
       await pageA.locator('#active-organisation').waitFor({ state: 'visible', timeout: 15000 });
     } catch {
