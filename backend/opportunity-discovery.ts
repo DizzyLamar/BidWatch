@@ -646,14 +646,20 @@ function updateKey(item: Opportunity) {
   return item.sourceId + '|content|' + (item.contentHash || hashContent([item.title, item.organisation, item.deadline].join('|')));
 }
 
-export async function persistOpportunityUpdates(results: OpportunitySourceResult[], scanType: 'scheduled' | 'manual' = 'manual') {
+export async function persistOpportunityUpdates(
+  results: OpportunitySourceResult[],
+  scanType: 'scheduled' | 'manual' = 'manual',
+  options: { recordSourceRuns?: boolean } = {},
+) {
   const existing = await db.list<OpportunityUpdate & { sourceStatus?: string; sourceMissingAt?: string | null }>('opportunity_updates', { limit: 2000 });
   const byKey = new Map(existing.items.map(item => [updateKey(item), item]));
   const timestamp = new Date().toISOString();
 
   for (const result of results) {
     const { notices: _notices, ...sourceSummary } = result;
-    await db.add('opportunity_source_runs', [{ ...sourceSummary, scanType }]);
+    if (options.recordSourceRuns !== false) {
+      await db.add('opportunity_source_runs', [{ ...sourceSummary, scanType }]);
+    }
 
     const seenKeys = new Set<string>();
     for (const opportunity of result.notices) {
