@@ -42,6 +42,7 @@ const PERMISSIONS: Array<{ key: Permission; label: string; group: string; descri
   { key: 'kpis.view.access', label: 'View access KPIs', group: 'KPIs', description: 'See identity, role and suspension posture.' },
   { key: 'kpis.view.storage', label: 'View storage KPIs', group: 'KPIs', description: 'See attachment and storage health metrics.' },
 ];
+const DEFAULT_CATEGORIES = ['Cybersecurity', 'Software Development', 'ICT Infrastructure', 'IT Support', 'Data & Analytics', 'Consulting', 'Other'];
 const STATUSES = ['New', 'Reviewing', 'Pursuing', 'Preparing', 'Ready to Submit', 'Applied', 'Declined'];
 const ACTIVE_STATUSES = ['New', 'Reviewing', 'Pursuing', 'Preparing', 'Ready to Submit'];
 function validWorkflowTransition(from: string, to: string) {
@@ -160,6 +161,10 @@ function opportunityMatch(textValue: string) {
 }
 
 async function listAll<T>(table: string, limit = 500) { const r = await db.list<T>(table, { limit }); return r.items; }
+async function ensureDefaultCategories() {
+  const categories = await listAll<{ name: string; active: boolean; createdAt: string }>('categories');
+  if (!categories.length) await db.add('categories', DEFAULT_CATEGORIES.map(name => ({ name, active: true, createdAt: now() })));
+}
 async function listCurrentOrganisationMembers(ctx: RouterContext) {
   if (!ctx.organisation || !supabaseAdmin) throw new Error('Organisation context is unavailable.');
   const { data: memberships, error: membershipError } = await supabaseAdmin
@@ -216,6 +221,7 @@ async function currentUser(ctx: RouterContext) {
   };
   return {
     ...user,
+    roleId: ctx.organisation.roleId,
     role,
     permissions: role.permissions,
     active: true,
@@ -342,7 +348,7 @@ export const handler = router({
   'POST /api/internal/opportunity-scan': [requireLegacyOrganisation(), async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); return json(await procurementDiscoveryHandler(ctx)); }],
   'GET /api/me': [requireAuth(), requireOrganisation(), async ctx => { const u = await currentUser(ctx); if (!u) return error('Your Google account is not provisioned for BidWatch.', 403); return json({ user: { ...u, role: u.role?.name || 'Member', onboardingCompleted: u.onboardingCompleted === true } }); }], 'PUT /api/me/profile': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('A display name is required.', 400); const next = { ...u, name, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ user: next }); }],
   'PUT /api/me/onboarding': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
-  'GET /api/config': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => { const records = await listAll<{ name: string; active: boolean }>('categories'); return json({ categories: records.filter(x => x.active).map(x => x.name), categoryRecords: records, statuses: STATUSES }); }],
+  'GET /api/config': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => { await ensureDefaultCategories(); const records = await listAll<{ name: string; active: boolean }>('categories'); return json({ categories: records.filter(x => x.active).map(x => x.name), categoryRecords: records, statuses: STATUSES }); }],
   'GET /api/opportunities/sources': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => json({ sources: DISCOVERY_SOURCES })],
   'GET /api/opportunities/updates': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => { const updates = await listOpportunityUpdates(60); return json({ updates, meta: { build: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'unknown', count: updates.length, supabaseHost: process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).host : 'not-configured' } }); }],
   'GET /api/opportunities/watchlists': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async ctx => { const u = await actor(ctx); const items = await listAll<Record<string, unknown>>('opportunity_watchlists'); return json({ watchlists: items.filter(x => x.userId === u.id).sort((a,b) => String(a.name).localeCompare(String(b.name))) }); }],
@@ -425,6 +431,6 @@ export const handler = router({
   'POST /api/admin/categories': [requireAuth(), requireOrganisation(),requirePermission('categories.manage'), async ctx => { const name = text((ctx.body as Record<string, unknown>).name, 'category'); if (!name) return error('Category name is required.', 400); const cats = await listAll<{ name: string; active: boolean }>('categories'); if (cats.some(x => x.name.toLowerCase() === name.toLowerCase())) return error('That category already exists.', 409); const [id] = await db.add('categories', [{ name, active: true, createdAt: now() }]); return json({ category: await getById('categories', id || '') }, 201); }],
   'PUT /api/admin/categories/:id': [requireAuth(), requireOrganisation(),requirePermission('categories.manage'), async ctx => { const old = await getById<{ name: string; active: boolean }>('categories', ctx.params.id); if (!old) return error('Category not found.', 404); const b = ctx.body as Record<string, unknown>; const next = { ...old, name: text(b.name, 'category', old.name), active: b.active === undefined ? old.active : Boolean(b.active) }; await db.update('categories', [{ id: old.id, record: next }]); return json({ category: next }); }],
   'GET /api/admin/audit': [requireAuth(), requireOrganisation(),requirePermission('audit.view'), async () => json({ events: (await listAll<Record<string, string>>('security_activity')).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 200) })],
-  'GET /api/admin/storage': [requireAuth(), requireOrganisation(),requirePermission('settings.manage'), async () => json(await storageStats())],
+  'GET /api/admin/storage': [requireAuth(), requireOrganisation(),requirePermission('settings.manage'), async ctx => json(await storageStats(ctx))],
   'POST /api/admin/storage/cleanup': [requireAuth(), requireOrganisation(),requireSuperAdmin(), async ctx => { const attachments = await listAll<{ path: string }>('attachments'); const tracked = new Set(attachments.map(a => a.path)); const prefix = `organisations/${ctx.organisation!.id}/tenders/`; const listed = await storageService.listAll(prefix, 10000); const orphaned = listed.paths.filter(path => !tracked.has(path)); if (orphaned.length) { const deleted = await storageService.delete(orphaned); if (deleted.some(ok => !ok)) return error('Some orphaned files could not be removed.', 500); } return json({ ok: true, deleted: orphaned.length }); }],
 });
