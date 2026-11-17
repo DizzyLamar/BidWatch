@@ -469,8 +469,10 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
         if (objects?.length) await admin.storage.from('bidwatch').remove(objects.map(object => `${folder}/${object.name}`));
       }
     }
-    if (recordIds.length) {
-      const { error } = await admin.from('app_records').delete().in('id', recordIds);
+    for (const organisationId of organisationIds) {
+      // Remove every tenant-owned test record, including activity rows created
+      // by the real HTTP handlers, before deleting the organisation itself.
+      const { error } = await admin.from('app_records').delete().eq('organisation_id', organisationId);
       if (error) throw error;
     }
     if (profileIds.length) {
