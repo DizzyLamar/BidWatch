@@ -1,4 +1,5 @@
 import { supabaseAdmin, type RouterContext, error, setDatabaseScope } from './runtime';
+import type { DatabaseScope } from './scoped-records';
 
 const GLOBAL_COLLECTIONS = new Set(['users', 'opportunity_source_runs']);
 const ORGANISATION_COLLECTIONS = new Set([
@@ -138,11 +139,14 @@ export function organisationDb(organisationId: string) {
   return scopedRepository('organisation', organisationId);
 }
 
-export function requireOrganisation() {
+export function createRequireOrganisationMiddleware(
+  database: any,
+  applyScope: (scope: DatabaseScope) => void,
+) {
   return async (ctx: RouterContext) => {
     if (!ctx.user) return error('Authentication required.', 401);
     let organisationId = String(ctx.req.headers['x-organisation-id'] || '').trim();
-    const db = client();
+    const db = database;
     if (!organisationId) {
       // A single active membership is an explicit, deterministic default.
       // Multiple memberships require the client to send X-Organisation-Id.
@@ -204,8 +208,12 @@ export function requireOrganisation() {
       permissions,
       isPlatformAdmin: Boolean(platformAdmin),
     };
-    setDatabaseScope({ kind: 'organisation', organisationId: organisation.id, legacyStorage: organisation.slug === 'legacy-bidwatch-workspace' });
+    applyScope({ kind: 'organisation', organisationId: organisation.id, legacyStorage: organisation.slug === 'legacy-bidwatch-workspace' });
   };
+}
+
+export function requireOrganisation() {
+  return createRequireOrganisationMiddleware(client(), setDatabaseScope);
 }
 
 export function requireLegacyOrganisation() {
