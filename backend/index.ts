@@ -469,7 +469,7 @@ export const handler = router({
     'POST /api/admin/users': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async ctx => {
       if (!ctx.organisation || !supabaseAdmin || !ctx.user) return error('Organisation context is unavailable.', 503);
       const body = ctx.body as Record<string, unknown>;
-      const email = text(body.email, 'source').toLowerCase();
+      const email = String(body.email || '').trim().toLowerCase();
       const name = text(body.name, 'title');
       const roleId = text(body.roleId, 'reference');
       if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email.length > 254) return error('Enter a valid email address.', 400);
