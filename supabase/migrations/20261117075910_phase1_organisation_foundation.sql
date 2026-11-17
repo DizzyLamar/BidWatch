@@ -21,12 +21,13 @@ begin
   from public.app_records
   where table_name = 'users';
 
-  if legacy_user_count = 0 then
-    raise exception 'Phase 1 migration aborted: no legacy users were found.';
-  end if;
-
-  select count(*)
-    into invalid_user_count
+  -- Existing installations must pass the legacy identity checks. A clean
+  -- local/test installation has no legacy profiles to migrate, so it may
+  -- create the empty workspace and provision its first owner through the
+  -- normal onboarding/bootstrap path.
+  if legacy_user_count > 0 then
+    select count(*)
+      into invalid_user_count
   from public.app_records u
   where u.table_name = 'users'
     and (
@@ -84,20 +85,21 @@ begin
       'Phase 1 migration aborted: a built-in legacy role has conflicting permission definitions.';
   end if;
 
-  if not exists (
-    select 1
-    from public.app_records u
-    join public.app_records r
-      on r.table_name = 'roles'
-     and r.id::text = u.record->>'roleId'
-    where u.table_name = 'users'
-      and r.record->>'name' = 'Super Admin'
-  ) then
-    raise exception
-      'Phase 1 migration aborted: no protected Super Admin identity is available to bootstrap platform administration.';
+    if not exists (
+      select 1
+      from public.app_records u
+      join public.app_records r
+        on r.table_name = 'roles'
+       and r.id::text = u.record->>'roleId'
+      where u.table_name = 'users'
+        and r.record->>'name' = 'Super Admin'
+    ) then
+      raise exception
+        'Phase 1 migration aborted: no protected Super Admin identity is available to bootstrap platform administration.';
+    end if;
   end if;
 end;
-$$;
+$;
 
 create table public.organisations (
   id uuid primary key default gen_random_uuid(),
