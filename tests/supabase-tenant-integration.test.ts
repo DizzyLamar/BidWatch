@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
+import express from 'express';
 import type { Request, Response } from 'express';
 import type { DatabaseScope } from '../backend/scoped-records';
 
@@ -44,6 +45,19 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
 
+  // Ensure the bucket exists before testing direct-client denial. A missing
+  // bucket must never be mistaken for a successful authorization test.
+  const { data: buckets, error: bucketsError } = await admin.storage.listBuckets();
+  assert.ifError(bucketsError);
+  const existingBucket = (buckets || []).find(bucket => bucket.id === 'bidwatch');
+  if (existingBucket) {
+    assert.equal(existingBucket.public, false, 'the integration bucket must be private');
+  } else {
+    const { error: createBucketError } = await admin.storage.createBucket('bidwatch', { public: false });
+    assert.ifError(createBucketError);
+    bucketCreated = true;
+  }
+
   // Import only after environment variables are present: runtime.ts creates
   // its server-side Supabase client from SUPABASE_URL and SUPABASE_SECRET_KEY.
   const runtime = await import('../backend/runtime');
@@ -55,7 +69,11 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
   const organisationIds: string[] = [];
   const roleIds: string[] = [];
   const membershipIds: string[] = [];
+  const profileIds: string[] = [];
   const recordIds: string[] = [];
+  let bucketCreated = false;
+  let httpServer: ReturnType<ReturnType<typeof express>['listen']> | null = null;
+  let apiBaseUrl = '';
   const tokens = new Map<string, string>();
   let currentScope: DatabaseScope | null = null;
 
@@ -93,7 +111,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
         organisation_id: organisation.id,
         key: 'member',
         name: 'Member',
-        permissions: ['bids.view', 'bids.create'],
+        permissions: ['bids.view', 'bids.create', 'attachments.upload', 'attachments.delete'],
         is_system: true,
       })
       .select('id')
@@ -114,6 +132,23 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       .single();
     assert.ifError(membershipError);
     membershipIds.push(membership.id);
+
+    const { data: profile, error: profileError } = await admin.from('app_records').insert({
+      table_name: 'users',
+      record: {
+        userId,
+        email: `bidwatch-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${suffix}@example.test`,
+        name,
+        roleId: role.id,
+        active: true,
+        status: 'Active',
+        createdAt: new Date().toISOString(),
+      },
+      scope_type: 'global',
+      organisation_id: null,
+    }).select('id').single();
+    assert.ifError(profileError);
+    profileIds.push(profile.id);
     return organisation.id;
   }
 
@@ -153,6 +188,65 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
     const userB = await createIdentity('b');
     const orgA = await createOrganisation('Integration Workspace A', 'integration-a', userA);
     const orgB = await createOrganisation('Integration Workspace B', 'integration-b', userB);
+
+    const tenderA = randomUUID();
+    const tenderB = randomUUID();
+    for (const [id, organisationId, title] of [
+      [tenderA, orgA, 'Private tender belonging to A'],
+      [tenderB, orgB, 'Private tender belonging to B'],
+    ] as const) {
+      const { error: tenderError } = await admin.from('app_records').insert({
+        id,
+        table_name: 'tenders',
+        record: {
+          title,
+          organisation: 'Integration client',
+          reference: '',
+          description: '',
+          deadline: '2099-12-31',
+          source: 'integration-test',
+          url: 'https://example.test/tender',
+          category: 'Other',
+          status: 'New',
+          assigneeId: '',
+          submittedBy: userA,
+          submittedAt: new Date().toISOString(),
+          notes: '',
+          revision: 1,
+        },
+        scope_type: 'organisation',
+        organisation_id: organisationId,
+      });
+      assert.ifError(tenderError);
+      recordIds.push(id);
+    }
+
+    const api = await import('../backend/index');
+    const app = express();
+    app.use(express.json({ limit: '15mb' }));
+    app.use(api.handler);
+    httpServer = app.listen(0, '127.0.0.1');
+    await new Promise<void>((resolve, reject) => {
+      httpServer!.once('listening', resolve);
+      httpServer!.once('error', reject);
+    });
+    const address = httpServer.address();
+    assert.ok(address && typeof address !== 'string');
+    apiBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    async function apiRequest(userId: string, organisationId: string | undefined, route: string, init: RequestInit = {}) {
+      const token = tokens.get(userId);
+      assert.ok(token);
+      return fetch(`${apiBaseUrl}${route}`, {
+        ...init,
+        headers: {
+          ...(init.headers || {}),
+          Authorization: `Bearer ${token}`,
+          ...(organisationId ? { 'X-Organisation-Id': organisationId } : {}),
+          ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        },
+      });
+    }
 
     const invalidCtx = {
       body: {},
@@ -249,6 +343,11 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
         .from('bidwatch')
         .upload(`integration/${suffix}/blocked.txt`, 'blocked', { contentType: 'text/plain' });
       assert.ok(storageError, 'direct authenticated uploads must be denied by the storage policy');
+      assert.match(
+        String(storageError.message || ''),
+        /row-level security|not authorized|permission denied|unauthorized/i,
+        'the denial must come from Storage authorization, not a missing bucket or unrelated failure',
+      );
 
       const ctx = await authenticatedContext(userA, orgA);
       const platformAdminResult = await tenancy.requirePlatformAdmin()(ctx);
@@ -268,6 +367,82 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       assert.equal(crossOrganisationRoleError.code, '23503');
     });
 
+    await t.test('real Express API routes enforce organisation boundaries', async () => {
+      const organisationsA = await apiRequest(userA, undefined, '/api/organisations');
+      assert.equal(organisationsA.status, 200);
+      const organisationBodyA = await organisationsA.json() as { organisations: Array<{ id: string }> };
+      assert.deepEqual(organisationBodyA.organisations.map(item => item.id), [orgA]);
+
+      const organisationsB = await apiRequest(userB, undefined, '/api/organisations');
+      assert.equal(organisationsB.status, 200);
+      const organisationBodyB = await organisationsB.json() as { organisations: Array<{ id: string }> };
+      assert.deepEqual(organisationBodyB.organisations.map(item => item.id), [orgB]);
+
+      const responseA = await apiRequest(userA, orgA, '/api/tenders');
+      assert.equal(responseA.status, 200);
+      const tendersA = await responseA.json() as { tenders: Array<{ id: string; title: string }> };
+      assert.deepEqual(tendersA.tenders.map(item => item.id), [tenderA]);
+      assert.equal(tendersA.tenders[0].title, 'Private tender belonging to A');
+
+      const responseB = await apiRequest(userB, orgB, '/api/tenders');
+      assert.equal(responseB.status, 200);
+      const tendersB = await responseB.json() as { tenders: Array<{ id: string; title: string }> };
+      assert.deepEqual(tendersB.tenders.map(item => item.id), [tenderB]);
+
+      const forged = await apiRequest(userB, orgA, '/api/tenders');
+      assert.equal(forged.status, 403, 'a real HTTP request cannot switch tenants by forging the organisation header');
+    });
+
+    await t.test('attachment upload, signed URL, cross-tenant denial and deletion work end to end', async () => {
+      const fileText = 'BidWatch tenant storage integration proof';
+      const content = Buffer.from(fileText, 'utf8').toString('base64');
+      const upload = await apiRequest(userA, orgA, `/api/tenders/${tenderA}/attachments`, {
+        method: 'POST',
+        body: JSON.stringify({
+          filename: 'proof.txt',
+          mimeType: 'text/plain',
+          size: Buffer.byteLength(fileText),
+          content,
+        }),
+      });
+      assert.equal(upload.status, 201, await upload.text().catch(() => ''));
+      const uploadBody = await upload.json() as { attachment: { id: string; filename: string } };
+      assert.equal(uploadBody.attachment.filename, 'proof.txt');
+      const attachmentId = uploadBody.attachment.id;
+
+      const folder = `organisations/${orgA}/tenders/${tenderA}`;
+      const { data: uploadedObjects, error: listUploadedError } = await admin.storage.from('bidwatch').list(folder, { limit: 100 });
+      assert.ifError(listUploadedError);
+      assert.equal(uploadedObjects?.length, 1, 'the object must exist in its organisation-owned storage prefix');
+      const objectPath = `${folder}/${uploadedObjects![0].name}`;
+
+      const directDownload = await authenticatedClient(userA).storage.from('bidwatch').download(objectPath);
+      assert.ok(directDownload.error, 'authenticated clients must not download private objects directly');
+      const directSignedUrl = await authenticatedClient(userA).storage.from('bidwatch').createSignedUrl(objectPath, 60);
+      assert.ok(directSignedUrl.error, 'authenticated clients must not mint Storage signed URLs directly');
+
+      const signedUrlResponse = await apiRequest(userA, orgA, `/api/attachments/${attachmentId}/url`);
+      assert.equal(signedUrlResponse.status, 200);
+      const signedUrlBody = await signedUrlResponse.json() as { url: string };
+      assert.ok(signedUrlBody.url);
+      const fileResponse = await fetch(signedUrlBody.url);
+      assert.equal(fileResponse.status, 200);
+      assert.equal(await fileResponse.text(), fileText);
+
+      const crossTenantUrl = await apiRequest(userB, orgB, `/api/attachments/${attachmentId}/url`);
+      assert.equal(crossTenantUrl.status, 404, 'another organisation must not resolve the attachment metadata or signed URL');
+
+      const deleted = await apiRequest(userA, orgA, `/api/attachments/${attachmentId}`, { method: 'DELETE' });
+      assert.equal(deleted.status, 200, await deleted.text().catch(() => ''));
+
+      const { data: remainingObjects, error: listRemainingError } = await admin.storage.from('bidwatch').list(folder, { limit: 100 });
+      assert.ifError(listRemainingError);
+      assert.deepEqual(remainingObjects, [], 'deleting attachment metadata through the API must remove the stored object too');
+
+      const afterDelete = await apiRequest(userA, orgA, `/api/attachments/${attachmentId}/url`);
+      assert.equal(afterDelete.status, 404, 'deleted attachment metadata must no longer produce a signed URL');
+    });
+
     await t.test('unauthenticated requests cannot resolve an organisation', async () => {
       const ctx = {
         body: {}, params: {}, query: {},
@@ -279,8 +454,26 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
     });
   } finally {
     currentScope = null;
+    if (httpServer) {
+      await new Promise<void>((resolve, reject) => httpServer!.close(error => error ? reject(error) : resolve()));
+    }
+    // Remove any object left behind if an assertion failed before the API
+    // lifecycle test reached its deletion step.
+    for (const organisationId of organisationIds) {
+      const { data: organisationRows } = await admin.from('app_records').select('id').eq('organisation_id', organisationId);
+      const tenderRecordIds = (organisationRows || []).filter(row => recordIds.includes(row.id)).map(row => row.id);
+      for (const tenderId of tenderRecordIds) {
+        const folder = `organisations/${organisationId}/tenders/${tenderId}`;
+        const { data: objects } = await admin.storage.from('bidwatch').list(folder, { limit: 100 });
+        if (objects?.length) await admin.storage.from('bidwatch').remove(objects.map(object => `${folder}/${object.name}`));
+      }
+    }
     if (recordIds.length) {
       const { error } = await admin.from('app_records').delete().in('id', recordIds);
+      if (error) throw error;
+    }
+    if (profileIds.length) {
+      const { error } = await admin.from('app_records').delete().in('id', profileIds);
       if (error) throw error;
     }
     if (membershipIds.length) {
@@ -297,6 +490,10 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
     }
     for (const identity of identities) {
       const { error } = await admin.auth.admin.deleteUser(identity.id);
+      if (error) throw error;
+    }
+    if (bucketCreated) {
+      const { error } = await admin.storage.deleteBucket('bidwatch');
       if (error) throw error;
     }
     await anon.auth.signOut();
