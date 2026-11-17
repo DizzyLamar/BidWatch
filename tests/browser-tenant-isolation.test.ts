@@ -182,12 +182,23 @@ test('browser workspace switching isolates two users and rejects a forged tenant
     const pageA = await contextA.newPage();
     pageA.on('console', message => console.log('[browser A]', message.type(), message.text()));
     pageA.on('pageerror', error => console.error('[browser A pageerror]', error.message));
+    pageA.on('response', async response => {
+      if (response.status() >= 400) {
+        const responseText = await response.text().catch(() => '');
+        console.error('[browser A response]', response.status(), response.url(), responseText.slice(0, 500));
+      }
+    });
     await pageA.goto(baseUrl, { waitUntil: 'domcontentloaded' });
     try {
       await pageA.locator('#active-organisation').waitFor({ state: 'visible', timeout: 15000 });
     } catch {
       const visibleText = await pageA.locator('body').innerText().catch(() => '<no body text>');
-      throw new Error('Browser A did not reach the organisation chooser. Auth storage key: ' + sessionA.storageKey + '. Page text: ' + visibleText.slice(0, 1000));
+      const storageState = await pageA.evaluate(key => {
+        const value = localStorage.getItem(key);
+        const session = value ? JSON.parse(value) : null;
+        return { keys: Object.keys(localStorage), hasSession: Boolean(session), accessTokenLength: session?.access_token?.length || 0, hasRefreshToken: Boolean(session?.refresh_token) };
+      }, sessionA.storageKey);
+      throw new Error('Browser A did not reach the organisation chooser. Auth storage key: ' + sessionA.storageKey + '. Storage: ' + JSON.stringify(storageState) + '. Page text: ' + visibleText.slice(0, 1000));
     }
     await pageA.locator('#active-organisation').selectOption(orgA);
     await pageA.getByRole('button', { name: 'Continue' }).click();
