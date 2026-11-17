@@ -145,7 +145,7 @@ export function assertOrganisationStoragePath(
     throw new Error('An organisation context is required for storage access.');
   }
   const segments = path.split('/');
-  if (!path || path.startsWith('/') || path.includes('\\\\') ||
+  if (!path || path.startsWith('/') || path.includes('\\') ||
       segments.some((part, index) => part === '..' || part === '.' || (part === '' && index < segments.length - 1))) {
     throw new Error('The storage path is invalid.');
   }
