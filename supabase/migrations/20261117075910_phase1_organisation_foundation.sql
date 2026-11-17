@@ -23,8 +23,8 @@ begin
 
   -- Existing installations must pass the legacy identity checks. A clean
   -- local/test installation has no legacy profiles to migrate, so it may
-  -- create the empty workspace and provision its first owner through the
-  -- normal onboarding/bootstrap path.
+  -- create the empty workspace. Its first platform owner must be provisioned
+  -- later through a separate, controlled bootstrap operation.
   if legacy_user_count > 0 then
     select count(*)
       into invalid_user_count
