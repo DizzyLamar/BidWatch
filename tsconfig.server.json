@@ -11,5 +11,5 @@
     "types": ["node"]
   },
   "include": ["backend", "server.ts", "src/platform.ts", "tests"],
-  "exclude": ["backend/realtime.ts", "backend/realtime-subscribers.ts"]
+  "exclude": ["backend/realtime.ts", "backend/realtime-subscribers.ts", "tests/browser-tenant-isolation.test.ts"]
 }
