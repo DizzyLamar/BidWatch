@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
-import { db, router, json, error, requireAuth, supabaseAdmin, type RouterContext } from './runtime';
-import { requireOrganisation, requireLegacyOrganisation } from './tenancy';
+import { db, router, json, error, requireAuth, supabaseAdmin, withDatabaseScope, type RouterContext } from './runtime';
+import { requireOrganisation } from './tenancy';
 import { storageService } from './storage';
 import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES } from './opportunity-discovery';
 import { verifyOpportunity } from './opportunity-verification';
@@ -349,47 +349,139 @@ async function buildKpis(ctx: RouterContext, u: Awaited<ReturnType<typeof curren
   return result;
 }
 
+async function listActiveOrganisations() {
+  if (!supabaseAdmin) throw new Error('Supabase is not configured.');
+  const { data, error: lookupError } = await supabaseAdmin
+    .from('organisations').select('id,slug').eq('status', 'active').order('created_at', { ascending: true });
+  if (lookupError) throw new Error(lookupError.message);
+  return data || [];
+}
+
 export async function procurementDiscoveryHandler(_event: unknown) {
+  const organisations = await listActiveOrganisations();
   const sources = await discoverPlatformOpportunities();
-  await persistOpportunityUpdates(sources, 'scheduled');
-  return { statusCode: 200, scannedAt: now(), sources };
+  const failures: Array<{ organisationId: string; error: string }> = [];
+  let processed = 0;
+
+  // Fetch each public source once, then persist the same observation snapshot
+  // independently inside every active organisation's database scope.
+  for (const organisation of organisations) {
+    try {
+      await withDatabaseScope({
+        kind: 'organisation',
+        organisationId: organisation.id,
+        legacyStorage: organisation.slug === 'legacy-bidwatch-workspace',
+      }, async () => {
+        await persistOpportunityUpdates(sources, 'scheduled', { recordSourceRuns: false });
+      });
+      processed += 1;
+    } catch (err) {
+      failures.push({
+        organisationId: organisation.id,
+        error: err instanceof Error ? err.message : 'Discovery persistence failed.',
+      });
+    }
+  }
+
+  // Source-run telemetry is deliberately global and recorded once per scan,
+  // not once for every tenant receiving the discovered opportunities.
+  await withDatabaseScope({ kind: 'global' }, async () => {
+    for (const source of sources) {
+      const { notices: _notices, ...summary } = source;
+      await db.add('opportunity_source_runs', [{ ...summary, scanType: 'scheduled' }]);
+    }
+  });
+
+  return {
+    statusCode: failures.length ? 207 : 200,
+    scannedAt: now(),
+    organisationsProcessed: processed,
+    organisationsFailed: failures.length,
+    failures,
+    sources: sources.map(({ notices: _notices, ...summary }) => summary),
+  };
 }
 
 export async function reminderHandler(_event: unknown) {
-  if (!supabaseAdmin) throw new Error('Supabase is not configured.');
-  const { data: workspace, error: workspaceError } = await supabaseAdmin.from('organisations')
-    .select('id').eq('slug', 'legacy-bidwatch-workspace').maybeSingle();
-  if (workspaceError || !workspace) throw new Error(workspaceError?.message || 'Legacy workspace not found.');
-  const { data: memberships, error: membershipError } = await supabaseAdmin.from('organisation_members')
-    .select('user_id,status').eq('organisation_id', workspace.id).eq('status', 'active');
-  if (membershipError) throw new Error(membershipError.message);
-  const activeUserIds = new Set((memberships || []).map(member => member.user_id));
-  const tenders = await listAll<Tender>('tenders');
-  const users = (await listAll<User>('users')).filter(user => Boolean(user.userId && activeUserIds.has(user.userId)));
-  const notes = await listAll<{ tenderId: string; userId: string; kind: string; createdAt: string }>('notifications');
-  for (const t of tenders) {
-    if (['Applied', 'Declined'].includes(t.status)) continue;
-    const diff = new Date(t.deadline).getTime() - Date.now();
-    const days = Math.ceil(diff / 86400000);
-    if (diff >= 0 && ![14, 7, 3, 1, 0].includes(days)) continue;
-    const kind = `deadline-${days}`;
-    const targets = t.assigneeId ? users.filter(user => user.id === t.assigneeId) : users;
-    for (const user of targets) {
-      if (!user.userId || notes.some(note => note.tenderId === t.id && note.userId === user.userId && note.kind === kind && new Date(note.createdAt).toDateString() === new Date().toDateString())) continue;
-      await db.add('notifications', [{
-        userId: user.userId, tenderId: t.id, kind,
-        title: diff < 0 ? 'Bid overdue' : days === 0 ? 'Bid due today' : `Bid due in ${days} days`,
-        body: `${t.title} for ${t.organisation} is ${diff < 0 ? 'past its deadline' : 'approaching its deadline'}.`,
-        read: false, createdAt: now(),
-      }]);
+  const organisations = await listActiveOrganisations();
+  const failures: Array<{ organisationId: string; error: string }> = [];
+  let notificationsCreated = 0;
+  let organisationsProcessed = 0;
+
+  for (const organisation of organisations) {
+    try {
+      const { data: memberships, error: membershipError } = await supabaseAdmin!
+        .from('organisation_members').select('user_id')
+        .eq('organisation_id', organisation.id).eq('status', 'active');
+      if (membershipError) throw new Error(membershipError.message);
+      const activeUserIds = new Set((memberships || []).map(member => member.user_id));
+
+      const created = await withDatabaseScope({
+        kind: 'organisation',
+        organisationId: organisation.id,
+        legacyStorage: organisation.slug === 'legacy-bidwatch-workspace',
+      }, async () => {
+        const tenders = await listAll<Tender>('tenders');
+        const users = (await listAll<User>('users'))
+          .filter(user => Boolean(user.userId && activeUserIds.has(user.userId)));
+        const notes = await listAll<{ tenderId: string; userId: string; kind: string; createdAt: string }>('notifications');
+        const sentToday = new Set(notes
+          .filter(note => new Date(note.createdAt).toDateString() === new Date().toDateString())
+          .map(note => [note.tenderId, note.userId, note.kind].join('|')));
+        let count = 0;
+
+        for (const tender of tenders) {
+          if (['Applied', 'Declined'].includes(tender.status)) continue;
+          const diff = new Date(tender.deadline).getTime() - Date.now();
+          const days = Math.ceil(diff / 86400000);
+          if (diff >= 0 && ![14, 7, 3, 1, 0].includes(days)) continue;
+          const kind = `deadline-${days}`;
+          const targets = tender.assigneeId
+            ? users.filter(user => user.id === tender.assigneeId)
+            : users;
+
+          for (const user of targets) {
+            if (!user.userId) continue;
+            const dedupeKey = [tender.id, user.userId, kind].join('|');
+            if (sentToday.has(dedupeKey)) continue;
+            await db.add('notifications', [{
+              userId: user.userId,
+              tenderId: tender.id,
+              kind,
+              title: diff < 0 ? 'Bid overdue' : days === 0 ? 'Bid due today' : `Bid due in ${days} days`,
+              body: `${tender.title} for ${tender.organisation} is ${diff < 0 ? 'past its deadline' : 'approaching its deadline'}.`,
+              read: false,
+              createdAt: now(),
+            }]);
+            sentToday.add(dedupeKey);
+            count += 1;
+          }
+        }
+        return count;
+      });
+
+      notificationsCreated += created;
+      organisationsProcessed += 1;
+    } catch (err) {
+      failures.push({
+        organisationId: organisation.id,
+        error: err instanceof Error ? err.message : 'Reminder generation failed.',
+      });
     }
   }
-  return { statusCode: 200 };
+
+  return {
+    statusCode: failures.length ? 207 : 200,
+    organisationsProcessed,
+    organisationsFailed: failures.length,
+    notificationsCreated,
+    failures,
+  };
 }
 
 export const handler = router({
-  'POST /api/internal/reminders': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); }, requireLegacyOrganisation(), async ctx => json(await reminderHandler(ctx))],
-  'POST /api/internal/opportunity-scan': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); }, requireLegacyOrganisation(), async ctx => json(await procurementDiscoveryHandler(ctx))],
+  'POST /api/internal/reminders': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); }, async ctx => json(await reminderHandler(ctx))],
+  'POST /api/internal/opportunity-scan': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); }, async ctx => json(await procurementDiscoveryHandler(ctx))],
   'GET /api/organisations': [requireAuth(), async ctx => json({ organisations: await listUserOrganisations(ctx) })],
   'GET /api/me': [requireAuth(), requireOrganisation(), async ctx => { const u = await currentUser(ctx); if (!u) return error('Your Google account is not provisioned for BidWatch.', 403); return json({ user: { ...u, role: u.role?.name || 'Member', isPlatformAdmin: ctx.organisation!.isPlatformAdmin, onboardingCompleted: u.onboardingCompleted === true } }); }], 'PUT /api/me/profile': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('A display name is required.', 400); const next = { ...u, name, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ user: next }); }],
   'PUT /api/me/onboarding': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
