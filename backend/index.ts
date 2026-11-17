@@ -185,6 +185,28 @@ async function listCurrentOrganisationMembers(ctx: RouterContext) {
       role: role?.name || 'Unknown role', status: member.status, joinedAt: member.joined_at };
   });
 }
+async function listUserOrganisations(ctx: RouterContext) {
+  if (!ctx.user || !supabaseAdmin) throw new Error('Authentication context is unavailable.');
+  const { data: memberships, error: membershipError } = await supabaseAdmin.from('organisation_members')
+    .select('id,organisation_id,role_id,status').eq('user_id', ctx.user.userId).eq('status', 'active');
+  if (membershipError) throw new Error(membershipError.message);
+  const organisationIds = (memberships || []).map(member => member.organisation_id);
+  if (!organisationIds.length) return [];
+  const [organisations, roles] = await Promise.all([
+    supabaseAdmin.from('organisations').select('id,name,slug,status').in('id', organisationIds),
+    supabaseAdmin.from('organisation_roles').select('id,name,key').in('id', (memberships || []).map(member => member.role_id)),
+  ]);
+  if (organisations.error) throw new Error(organisations.error.message);
+  if (roles.error) throw new Error(roles.error.message);
+  const roleById = new Map((roles.data || []).map(role => [role.id, role]));
+  const membershipByOrg = new Map((memberships || []).map(member => [member.organisation_id, member]));
+  return (organisations.data || []).filter(org => org.status === 'active').map(org => {
+    const membership = membershipByOrg.get(org.id);
+    const role = membership ? roleById.get(membership.role_id) : null;
+    return { id: org.id, name: org.name, slug: org.slug, membershipId: membership?.id,
+      roleId: role?.id, roleName: role?.name || 'Unknown role', roleKey: role?.key || '' };
+  });
+}
 async function listCurrentOrganisationRoles(ctx: RouterContext) {
   if (!ctx.organisation || !supabaseAdmin) throw new Error('Organisation context is unavailable.');
   const { data, error: queryError } = await supabaseAdmin.from('organisation_roles')
@@ -355,6 +377,7 @@ export async function reminderHandler(_event: unknown) {
 export const handler = router({
   'POST /api/internal/reminders': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); }, requireLegacyOrganisation(), async ctx => json(await reminderHandler(ctx))],
   'POST /api/internal/opportunity-scan': [async ctx => { if (!validCronSecret(ctx)) return error('Forbidden.', 403); }, requireLegacyOrganisation(), async ctx => json(await procurementDiscoveryHandler(ctx))],
+  'GET /api/organisations': [requireAuth(), async ctx => json({ organisations: await listUserOrganisations(ctx) })],
   'GET /api/me': [requireAuth(), requireOrganisation(), async ctx => { const u = await currentUser(ctx); if (!u) return error('Your Google account is not provisioned for BidWatch.', 403); return json({ user: { ...u, role: u.role?.name || 'Member', onboardingCompleted: u.onboardingCompleted === true } }); }], 'PUT /api/me/profile': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('A display name is required.', 400); const next = { ...u, name, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ user: next }); }],
   'PUT /api/me/onboarding': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
   'GET /api/config': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => { await ensureDefaultCategories(); const records = await listAll<{ name: string; active: boolean }>('categories'); return json({ categories: records.filter(x => x.active).map(x => x.name), categoryRecords: records, statuses: STATUSES }); }],
