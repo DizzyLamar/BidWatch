@@ -1,5 +1,7 @@
 # First platform administrator bootstrap
 
+> **You do not need to run this as part of normal development or for an existing workspace.** It is only for an operator creating a fresh local database that has no platform administrator. If your current BidWatch workspace already works, leave it alone.
+
 The platform administrator list is intentionally separate from organisation roles. A clean installation has no platform administrator until an operator performs this controlled bootstrap.
 
 ## Safety model
