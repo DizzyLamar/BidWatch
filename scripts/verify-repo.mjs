@@ -52,6 +52,9 @@ for (const [pattern, description] of [
   ["eq('status', 'active')", 'active membership verification'],
   ["from('platform_admins')", 'database-backed platform administrator lookup'],
   ['ctx.organisation =', 'verified organisation request context'],
+  ['new Set(ids).size !== ids.length', 'duplicate-ID rejection for scoped batch mutations'],
+  ['Scoped update rejected:', 'complete target-set validation before scoped updates'],
+  ['Scoped delete rejected:', 'complete target-set validation before scoped deletes'],
 ]) {
   if (!tenancy.includes(pattern)) failures.push(`Tenant isolation regression: ${description} missing.`);
 }
