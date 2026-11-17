@@ -373,6 +373,12 @@ test('browser member administration enforces role changes, suspension, removal a
     });
     assert.equal(deniedRoleWrite.status, 403, 'ordinary members cannot create or grant administrative roles');
 
+    const deniedSensitiveGrant = await request(ownerPage, ownerSession.access_token, '/api/admin/roles', 'POST', {
+      name: 'Sensitive Permission Role', permissions: ['users.manage'],
+    });
+    assert.equal(deniedSensitiveGrant.status, 403,
+      'an organisation administrator who is not a platform administrator cannot grant sensitive permissions');
+
     const listed = await request(ownerPage, ownerSession.access_token, '/api/admin/users');
     assert.equal(listed.status, 200);
     const memberEntry = (listed.payload.users || []).find((item: any) => item.userId === member.id);
