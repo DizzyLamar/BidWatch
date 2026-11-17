@@ -424,10 +424,6 @@ export async function reminderHandler(_event: unknown) {
         const tenders = await listAll<Tender>('tenders');
         const users = (await listAll<User>('users'))
           .filter(user => Boolean(user.userId && activeUserIds.has(user.userId)));
-        const notes = await listAll<{ tenderId: string; userId: string; kind: string; createdAt: string }>('notifications');
-        const sentToday = new Set(notes
-          .filter(note => new Date(note.createdAt).toDateString() === new Date().toDateString())
-          .map(note => [note.tenderId, note.userId, note.kind].join('|')));
         let count = 0;
 
         for (const tender of tenders) {
@@ -442,9 +438,7 @@ export async function reminderHandler(_event: unknown) {
 
           for (const user of targets) {
             if (!user.userId) continue;
-            const dedupeKey = [tender.id, user.userId, kind].join('|');
-            if (sentToday.has(dedupeKey)) continue;
-            await db.add('notifications', [{
+            const notification = {
               userId: user.userId,
               tenderId: tender.id,
               kind,
@@ -452,9 +446,13 @@ export async function reminderHandler(_event: unknown) {
               body: `${tender.title} for ${tender.organisation} is ${diff < 0 ? 'past its deadline' : 'approaching its deadline'}.`,
               read: false,
               createdAt: now(),
-            }]);
-            sentToday.add(dedupeKey);
-            count += 1;
+            };
+            const inserted = await supabaseAdmin!.rpc('create_notification_once', {
+              p_organisation_id: organisation.id,
+              p_record: notification,
+            });
+            if (inserted.error) throw new Error(inserted.error.message);
+            if (inserted.data === true) count += 1;
           }
         }
         return count;
