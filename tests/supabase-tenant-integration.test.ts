@@ -51,6 +51,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', {
   const membershipIds: string[] = [];
   const recordIds: string[] = [];
   const tokens = new Map<string, string>();
+  let currentScope: DatabaseScope | null = null;
 
   async function createIdentity(label: string) {
     const email = `bidwatch-${label}-${suffix}@example.test`;
@@ -154,7 +155,6 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', {
       assert.notEqual(ctxA.user?.userId, ctxB.user?.userId);
     });
 
-    let currentScope: DatabaseScope | null = null;
     const applyScope = (scope: DatabaseScope) => { currentScope = scope; };
     const resolveOrganisation = tenancy.createRequireOrganisationMiddleware(admin, applyScope);
     const repository = scoped.createScopedRecordRepository(admin, () => currentScope);
