@@ -187,14 +187,20 @@ test('browser workspace switching isolates two users and rejects a forged tenant
     await pageA.getByRole('button', { name: 'Continue' }).click();
     await pageA.locator('.app-shell').waitFor({ state: 'visible' });
 
-    const readTitles = async (page: Page) => page.evaluate(async () => {
-      const response = await fetch('/api/tenders');
+    const readTitles = async (page: Page, token: string) => page.evaluate(async (accessToken: string) => {
+      const organisationId = localStorage.getItem('bidwatch-active-organisation') || '';
+      const response = await fetch('/api/tenders', {
+        headers: {
+          Authorization: 'Bearer ' + accessToken,
+          'X-Organisation-Id': organisationId,
+        },
+      });
       const body = await response.json();
       if (!response.ok) throw new Error('Tender request failed: ' + response.status);
       return (body.tenders || []).map((tender: { title: string }) => tender.title);
-    });
+    }, token);
 
-    const titlesA = await readTitles(pageA);
+    const titlesA = await readTitles(pageA, sessionA.session.access_token);
     assert.ok(titlesA.some(title => title.includes('Private Tender A ' + suffix)));
     assert.ok(!titlesA.some(title => title.includes('Private Tender B ' + suffix)));
 
@@ -205,7 +211,7 @@ test('browser workspace switching isolates two users and rejects a forged tenant
     ]);
     await pageA.locator('.app-shell').waitFor({ state: 'visible' });
     await pageA.waitForFunction(id => localStorage.getItem('bidwatch-active-organisation') === id, orgB);
-    const titlesB = await readTitles(pageA);
+    const titlesB = await readTitles(pageA, sessionA.session.access_token);
     assert.ok(titlesB.some(title => title.includes('Private Tender B ' + suffix)));
     assert.ok(!titlesB.some(title => title.includes('Private Tender A ' + suffix)));
     await contextA.close();
@@ -219,7 +225,7 @@ test('browser workspace switching isolates two users and rejects a forged tenant
     await pageB.goto(baseUrl, { waitUntil: 'domcontentloaded' });
     await pageB.locator('.app-shell').waitFor({ state: 'visible' });
 
-    const ownTitles = await readTitles(pageB);
+    const ownTitles = await readTitles(pageB, sessionB.session.access_token);
     assert.ok(ownTitles.some(title => title.includes('Private Tender B ' + suffix)));
     assert.ok(!ownTitles.some(title => title.includes('Private Tender A ' + suffix)));
 
