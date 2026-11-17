@@ -167,6 +167,50 @@ values (
 -- Preserve every distinct legacy role definition. The protected legacy
 -- Super Admin role becomes the workspace Owner role; platform-wide authority
 -- is represented separately in platform_admins.
+with role_candidates as (
+  select
+    o.id as organisation_id,
+    case r.record->>'name'
+      when 'Super Admin' then 'owner'
+      when 'Bid Manager' then 'bid_manager'
+      when 'Member' then 'member'
+      else
+        'legacy_' || substr(
+          md5(
+            coalesce(r.record->>'name', '') || '|' ||
+            coalesce(r.record->'permissions', '[]'::jsonb)::text
+          ),
+          1,
+          12
+        )
+    end as role_key,
+    case r.record->>'name'
+      when 'Super Admin' then 'Owner'
+      else r.record->>'name'
+    end as role_name,
+    case r.record->>'name'
+      when 'Super Admin' then 'Full administrative access within this organisation.'
+      else nullif(r.record->>'description', '')
+    end as role_description,
+    coalesce(r.record->'permissions', '[]'::jsonb) as role_permissions,
+    coalesce((r.record->>'system')::boolean, false) as role_is_system,
+    r.id as legacy_role_id
+  from public.app_records r
+  cross join public.organisations o
+  where r.table_name = 'roles'
+    and o.slug = 'legacy-bidwatch-workspace'
+),
+deduplicated_roles as (
+  select distinct on (organisation_id, role_key)
+    organisation_id,
+    role_key,
+    role_name,
+    role_description,
+    role_permissions,
+    role_is_system
+  from role_candidates
+  order by organisation_id, role_key, legacy_role_id
+)
 insert into public.organisation_roles (
   organisation_id,
   key,
@@ -175,36 +219,14 @@ insert into public.organisation_roles (
   permissions,
   is_system
 )
-select distinct
-  o.id,
-  case r.record->>'name'
-    when 'Super Admin' then 'owner'
-    when 'Bid Manager' then 'bid_manager'
-    when 'Member' then 'member'
-    else
-      'legacy_' || substr(
-        md5(
-          coalesce(r.record->>'name', '') || '|' ||
-          coalesce(r.record->'permissions', '[]'::jsonb)::text
-        ),
-        1,
-        12
-      )
-  end,
-  case r.record->>'name'
-    when 'Super Admin' then 'Owner'
-    else r.record->>'name'
-  end,
-  case r.record->>'name'
-    when 'Super Admin' then 'Full administrative access within this organisation.'
-    else nullif(r.record->>'description', '')
-  end,
-  coalesce(r.record->'permissions', '[]'::jsonb),
-  coalesce((r.record->>'system')::boolean, false)
-from public.app_records r
-cross join public.organisations o
-where r.table_name = 'roles'
-  and o.slug = 'legacy-bidwatch-workspace'
+select
+  organisation_id,
+  role_key,
+  role_name,
+  role_description,
+  role_permissions,
+  role_is_system
+from deduplicated_roles
 on conflict (organisation_id, key) do nothing;
 
 -- Map each existing provisioned profile to its Auth identity and its
@@ -388,7 +410,7 @@ begin
       and (scope_type <> 'global' or organisation_id is not null))
     or
     (table_name not in ('users', 'opportunity_source_runs')
-      and (scope_type <> 'organisation' or organisation_id is null);
+      and (scope_type <> 'organisation' or organisation_id is null));
 
   if invalid_scope_count > 0 then
     raise exception
