@@ -1,4 +1,4 @@
-import { supabaseAdmin, type RouterContext, error } from './runtime';
+import { supabaseAdmin, type RouterContext, error, setDatabaseScope } from './runtime';
 
 const GLOBAL_COLLECTIONS = new Set(['users', 'opportunity_source_runs']);
 const ORGANISATION_COLLECTIONS = new Set([
@@ -138,7 +138,7 @@ export function organisationDb(organisationId: string) {
   return scopedRepository('organisation', organisationId);
 }
 
-export async function requireOrganisation() {
+export function requireOrganisation() {
   return async (ctx: RouterContext) => {
     if (!ctx.user) return error('Authentication required.', 401);
     const organisationId = String(ctx.req.headers['x-organisation-id'] || '').trim();
@@ -191,6 +191,20 @@ export async function requireOrganisation() {
       permissions,
       isPlatformAdmin: Boolean(platformAdmin),
     };
+    setDatabaseScope({ kind: 'organisation', organisationId: organisation.id });
+  };
+}
+
+export function requireLegacyOrganisation() {
+  return async (_ctx: RouterContext) => {
+    const { data, error: lookupError } = await client()
+      .from('organisations').select('id,status').eq('slug', 'legacy-bidwatch-workspace').maybeSingle();
+    if (lookupError) {
+      console.error('Legacy workspace lookup failed:', lookupError.message);
+      return error('Could not resolve the scheduled workspace.', 503);
+    }
+    if (!data || data.status !== 'active') return error('The scheduled workspace is unavailable.', 503);
+    setDatabaseScope({ kind: 'organisation', organisationId: data.id });
   };
 }
 
