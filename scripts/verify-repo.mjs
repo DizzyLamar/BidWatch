@@ -59,6 +59,24 @@ for (const [pattern, description] of [
   if (!tenancy.includes(pattern)) failures.push(`Tenant isolation regression: ${description} missing.`);
 }
 if (!runtime.includes('organisation?:')) failures.push('Router context is missing the verified organisation context.');
+if (!runtime.includes('AsyncLocalStorage')) failures.push('Database access is not bound to an isolated request context.');
+if (!runtime.includes('A verified database scope is required')) failures.push('Unscoped app-record access is not rejected.');
+if (!runtime.includes("eq('scope_type', 'global').is('organisation_id', null)")) failures.push('Global records are not explicitly filtered.');
+if (!runtime.includes('scope_type: GLOBAL_COLLECTIONS.has(table) ? \'global\' : \'organisation\'')) failures.push('New app records are not assigned an explicit scope.');
+
+const routeLines = backend.split('\\n').filter(line => /^\\s*['"](GET|POST|PUT|DELETE) /.test(line));
+for (const line of routeLines) {
+  if (line.includes('requireAuth()') && !line.includes('requireOrganisation()')) {
+    failures.push('An authenticated API route is missing organisation membership middleware.');
+  }
+  if (line.includes('/api/internal/') && !line.includes('requireLegacyOrganisation()')) {
+    failures.push('An internal scheduled route is missing its explicit legacy workspace scope.');
+  }
+}
+if (!backend.includes('listCurrentOrganisationMembers(ctx)')) failures.push('Organisation member administration is not membership-scoped.');
+if (!backend.includes('listCurrentOrganisationRoles(ctx)')) failures.push('Organisation role reads are not relational and tenant-scoped.');
+if (!backend.includes('organisations/\u0024{ctx.organisation!.id}/tenders/')) failures.push('New attachment uploads are not organisation-prefixed.');
+if (!backend.includes("eq('status', 'active')")) failures.push('Reminder delivery does not filter active organisation memberships.');
 
 if (!uiCss.includes('.modal-backdrop')) failures.push('Confirmation modal styling is missing from the UI system.');
 if (!css.includes('.form-error')) failures.push('Inline production error styling is missing.');
