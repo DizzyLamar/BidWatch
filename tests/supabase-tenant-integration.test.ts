@@ -273,7 +273,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       });
     }
 
-    await t.test('organisation administrators can invite, activate, suspend, restore and remove members', async () => {
+    await t.test('organisation administrators can invite, accept, change roles, suspend, reactivate and remove members', async () => {
       const { data: ownerRole, error: ownerRoleLookupError } = await admin.from('organisation_roles')
         .select('id').eq('organisation_id', orgA).single();
       assert.ifError(ownerRoleLookupError);
@@ -328,6 +328,20 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       assert.ifError(acceptedMembershipError);
       assert.equal(acceptedMembership.status, 'active');
       await anon.auth.signOut();
+
+      const { data: observerRole, error: observerRoleError } = await admin.from('organisation_roles')
+        .insert({ organisation_id: orgA, key: `observer_${suffix.slice(0, 8)}`, name: 'Integration Observer', permissions: ['bids.view'], is_system: false })
+        .select('id').single();
+      assert.ifError(observerRoleError);
+      roleIds.push(observerRole.id);
+      const changedRole = await apiRequest(userA, orgA, `/api/admin/users/${membership.id}`, {
+        method: 'PUT', body: JSON.stringify({ roleId: observerRole.id }),
+      });
+      assert.equal(changedRole.status, 200, await changedRole.text());
+      const wrongTenantRole = await apiRequest(userA, orgA, `/api/admin/users/${membership.id}`, {
+        method: 'PUT', body: JSON.stringify({ roleId: (await admin.from('organisation_roles').select('id').eq('organisation_id', orgB).single()).data!.id }),
+      });
+      assert.equal(wrongTenantRole.status, 400);
 
       const suspended = await apiRequest(userA, orgA, `/api/admin/users/${membership.id}`, {
         method: 'PUT', body: JSON.stringify({ status: 'suspended' }),
