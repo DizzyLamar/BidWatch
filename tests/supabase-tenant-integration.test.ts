@@ -273,11 +273,17 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       });
     }
 
-    await t.test('organisation administrators can invite, accept, change roles, suspend, reactivate and remove members', async () => {
+    await t.test('organisation administrators can invite, accept, change roles, suspend, reactivate and remove members', async t => {
       const { data: ownerRole, error: ownerRoleLookupError } = await admin.from('organisation_roles')
-        .select('id').eq('organisation_id', orgA).single();
+        .select('id,permissions').eq('organisation_id', orgA).single();
       assert.ifError(ownerRoleLookupError);
       assert.ok(ownerRole);
+      const originalPermissions = ownerRole.permissions;
+      t.after(async () => {
+        const { error } = await admin.from('organisation_roles')
+          .update({ permissions: originalPermissions }).eq('organisation_id', orgA).eq('id', ownerRole.id);
+        assert.ifError(error);
+      });
       const { error: permissionError } = await admin.from('organisation_roles')
         .update({ permissions: ['bids.view', 'users.view', 'users.manage'] })
         .eq('organisation_id', orgA).eq('id', ownerRole.id);
@@ -335,7 +341,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       tokens.set(invitedUserId, signedIn.session.access_token);
 
       const organisationsResponse = await apiRequest(invitedUserId, undefined, '/api/organisations');
-      assert.equal(organisationsResponse.status, 200, await organisationsResponse.text());
+      assert.equal(organisationsResponse.status, 200);
       const organisationsBody = await organisationsResponse.json() as { organisations: Array<{ id: string }> };
       assert.ok(organisationsBody.organisations.some(item => item.id === orgA));
       const { data: acceptedMembership, error: acceptedMembershipError } = await admin.from('organisation_members')
@@ -345,7 +351,7 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       assert.equal(acceptedMembership.status, 'active');
 
       const memberListResponse = await apiRequest(userA, orgA, '/api/admin/users');
-      assert.equal(memberListResponse.status, 200, await memberListResponse.text());
+      assert.equal(memberListResponse.status, 200);
       const memberListBody = await memberListResponse.json() as { users: Array<{ id: string; membershipId: string; userId: string }> };
       const listedInvitee = memberListBody.users.find(member => member.userId === invitedUserId);
       assert.ok(listedInvitee);
@@ -507,12 +513,9 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
     await t.test('database constraints reject assigning a role from another organisation', async () => {
       const { error: crossOrganisationRoleError } = await admin
         .from('organisation_members')
-        .insert({
-          organisation_id: orgA,
-          user_id: userB,
-          role_id: roleIds[1],
-          status: 'active',
-        });
+        .update({ role_id: roleIds[1] })
+        .eq('organisation_id', orgA)
+        .eq('user_id', userB);
       assert.ok(crossOrganisationRoleError);
       assert.equal(crossOrganisationRoleError.code, '23503');
     });
