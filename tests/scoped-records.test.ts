@@ -168,10 +168,11 @@ test('storage paths cannot cross organisations or escape their namespace', () =>
   const orgB: DatabaseScope = { kind: 'organisation', organisationId: 'org-b' };
 
   assert.doesNotThrow(() => assertOrganisationStoragePath('organisations/org-a/tenders/123/file.pdf', orgA, false));
+  assert.doesNotThrow(() => assertOrganisationStoragePath('organisations/org-a/tenders/', orgA, true));
   assert.throws(() => assertOrganisationStoragePath('organisations/org-b/tenders/123/file.pdf', orgA), /outside the active organisation/);
   assert.throws(() => assertOrganisationStoragePath('organisations/org-a/../org-b/file.pdf', orgA), /path is invalid/);
   assert.throws(() => assertOrganisationStoragePath('/organisations/org-a/file.pdf', orgA), /path is invalid/);
-  assert.throws(() => assertOrganisationStoragePath('organisations/org-a\\\\file.pdf', orgA), /path is invalid/);
+  assert.throws(() => assertOrganisationStoragePath('organisations/org-a\\file.pdf', orgA), /path is invalid/);
   assert.throws(() => assertOrganisationStoragePath('organisations/org-a//file.pdf', orgA), /path is invalid/);
   assert.throws(() => assertOrganisationStoragePath('organisations/org-a/file.pdf', orgB), /outside the active organisation/);
 });
