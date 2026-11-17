@@ -80,7 +80,9 @@ if (!backend.includes('activeOrganisationProfileIds(ctx)')) failures.push('Tende
 if (!backend.includes('requireLegacyOrganisation()')) failures.push('Scheduled jobs do not have an explicit tenant execution scope.');
 if (!backend.includes("eq('status', 'active')")) failures.push('Scheduled reminders do not verify active organisation memberships.');
 if (!backend.includes("Member invitations are temporarily unavailable")) failures.push('Legacy global identity provisioning has not been disabled during the membership cutover.');
-if (!backend.includes("Organisation role changes are temporarily unavailable")) failures.push('Legacy app-record role mutation remains available after relational role cutover.');
+if (!backend.includes("from('organisation_roles')")) failures.push('Organisation role management is not backed by relational roles.');
+if (!backend.includes('Only a platform administrator can allocate sensitive permissions.')) failures.push('Sensitive role permissions are not protected by platform-admin authorization.');
+if (!backend.includes("This role is assigned to organisation members.")) failures.push('Assigned organisation roles are not protected from deletion.');
 if (!backend.includes("'GET /api/organisations': [requireAuth()")) failures.push('Authenticated organisation discovery is missing.');
 if (!platform.includes("'X-Organisation-Id'")) failures.push('The API client does not send the explicitly selected organisation context.');
 if (!platform.includes('setOrganisationId(id: string | null)')) failures.push('The API client cannot persist an explicit organisation selection.');
