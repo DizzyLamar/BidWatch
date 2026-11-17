@@ -554,6 +554,73 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       assert.equal(forged.status, 403, 'a real HTTP request cannot switch to an organisation without membership');
     });
 
+    await t.test('database serializes concurrent last-owner exits', async () => {
+      const ownerA = await createIdentity('owner-a');
+      const ownerB = await createIdentity('owner-b');
+      const ownerOrg = await createOrganisation('Owner Guard Workspace', 'owner-guard', ownerA);
+
+      const { data: ownerRole, error: ownerRoleError } = await admin.from('organisation_roles')
+        .insert({
+          organisation_id: ownerOrg,
+          key: 'owner',
+          name: 'Owner',
+          permissions: ['bids.view', 'users.manage'],
+          is_system: true,
+        })
+        .select('id')
+        .single();
+      assert.ifError(ownerRoleError);
+      assert.ok(ownerRole);
+
+      const { error: promoteOwnerError } = await admin.from('organisation_members')
+        .update({ role_id: ownerRole.id })
+        .eq('organisation_id', ownerOrg)
+        .eq('user_id', ownerA);
+      assert.ifError(promoteOwnerError);
+
+      const { error: secondOwnerError } = await admin.from('organisation_members').insert({
+        organisation_id: ownerOrg,
+        user_id: ownerB,
+        role_id: ownerRole.id,
+        status: 'active',
+        joined_at: new Date().toISOString(),
+      });
+      assert.ifError(secondOwnerError);
+
+      const attempts = await Promise.all([
+        admin.from('organisation_members').update({ status: 'suspended' })
+          .eq('organisation_id', ownerOrg).eq('user_id', ownerA).select('id'),
+        admin.from('organisation_members').update({ status: 'suspended' })
+          .eq('organisation_id', ownerOrg).eq('user_id', ownerB).select('id'),
+      ]);
+      const successfulExits = attempts.filter(result => !result.error);
+      const rejectedExits = attempts.filter(result => result.error);
+      assert.equal(successfulExits.length, 1, 'exactly one concurrent owner exit may commit');
+      assert.equal(rejectedExits.length, 1, 'the competing owner exit must be rejected');
+      assert.equal(rejectedExits[0].error?.code, '23514');
+
+      const { count: remainingOwners, error: remainingOwnersError } = await admin
+        .from('organisation_members').select('id', { count: 'exact', head: true })
+        .eq('organisation_id', ownerOrg).eq('role_id', ownerRole.id).eq('status', 'active');
+      assert.ifError(remainingOwnersError);
+      assert.equal(remainingOwners, 1, 'one active owner must remain after concurrent requests');
+
+      const { data: remainingOwner, error: remainingOwnerError } = await admin
+        .from('organisation_members').select('id')
+        .eq('organisation_id', ownerOrg).eq('role_id', ownerRole.id).eq('status', 'active').single();
+      assert.ifError(remainingOwnerError);
+      assert.ok(remainingOwner);
+
+      const finalOwnerDelete = await admin.from('organisation_members').delete()
+        .eq('id', remainingOwner.id);
+      assert.equal(finalOwnerDelete.error?.code, '23514', 'the final active owner cannot be deleted');
+
+      const roleIdentityChange = await admin.from('organisation_roles')
+        .update({ key: 'former_owner' })
+        .eq('id', ownerRole.id);
+      assert.equal(roleIdentityChange.error?.code, '23514', 'the owner role key cannot be changed');
+    });
+
     await t.test('attachment upload, signed URL, cross-tenant denial and deletion work end to end', async () => {
       const fileText = 'BidWatch tenant storage integration proof';
       const content = Buffer.from(fileText, 'utf8').toString('base64');
