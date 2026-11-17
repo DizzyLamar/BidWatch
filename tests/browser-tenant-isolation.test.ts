@@ -123,7 +123,6 @@ async function signIn(email: string) {
   const { data, error } = await client.auth.signInWithPassword({ email, password });
   if (error || !data.session) throw error || new Error('Could not sign in browser-test identity.');
   const storageKey = 'sb-' + new URL(supabaseUrl).hostname.split('.')[0] + '-auth-token';
-  await client.auth.signOut();
   return { storageKey, session: data.session };
 }
 
