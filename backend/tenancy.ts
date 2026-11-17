@@ -81,6 +81,21 @@ function scopedRepository(scope: Scope, organisationId?: string) {
 
     async update(table: string, updates: Array<{ id: string; record: RecordValue }>) {
       assertCollection(scope, table);
+      if (!updates.length) return;
+      const ids = updates.map(update => update.id);
+      if (new Set(ids).size !== ids.length) throw new Error('A scoped update cannot contain duplicate record IDs.');
+
+      // Validate the complete target set before the first write. This prevents a
+      // mixed-tenant batch from partially updating records in the caller's tenant
+      // before discovering that another requested ID is outside its scope.
+      const lookup = client().from('app_records').select('id')
+        .eq('table_name', table).in('id', ids);
+      const visible = await withScope(lookup, scope, organisationId);
+      if (visible.error) throw new Error(visible.error.message);
+      const visibleIds = new Set((visible.data || []).map((row: { id: string }) => row.id));
+      const missing = ids.filter(id => !visibleIds.has(id));
+      if (missing.length) throw new Error(`Scoped update rejected: one or more ${table} records are unavailable in this scope.`);
+
       for (const update of updates) {
         const query = client().from('app_records')
           .update({ record: cleanRecord(update.record), updated_at: new Date().toISOString() })
@@ -94,6 +109,18 @@ function scopedRepository(scope: Scope, organisationId?: string) {
     async delete(table: string, ids: string[]) {
       assertCollection(scope, table);
       if (!ids.length) return;
+      if (new Set(ids).size !== ids.length) throw new Error('A scoped delete cannot contain duplicate record IDs.');
+
+      // Preflight the full ID set so a cross-tenant or nonexistent ID cannot
+      // cause an otherwise valid subset to be deleted before the mismatch is seen.
+      const lookup = client().from('app_records').select('id')
+        .eq('table_name', table).in('id', ids);
+      const visible = await withScope(lookup, scope, organisationId);
+      if (visible.error) throw new Error(visible.error.message);
+      if ((visible.data || []).length !== ids.length) {
+        throw new Error(`Scoped delete rejected: one or more ${table} records are unavailable in this scope.`);
+      }
+
       const query = client().from('app_records').delete().eq('table_name', table).in('id', ids).select('id');
       const result = await withScope(query, scope, organisationId);
       if (result.error) throw new Error(result.error.message);
