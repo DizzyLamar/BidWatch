@@ -552,9 +552,9 @@ export const handler = router({
       return json({ ok: true, status: membershipStatus, email }, 201);
     }],
     'PUT /api/admin/users/:id': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async ctx => {
-      if (!ctx.organisation || !adminClient || !ctx.user) return error('Organisation context is unavailable.', 503);
+      if (!ctx.organisation || !supabaseAdmin || !ctx.user) return error('Organisation context is unavailable.', 503);
       const body = ctx.body as Record<string, unknown>;
-      const { data: member, error: memberError } = await adminClient.from('organisation_members')
+      const { data: member, error: memberError } = await supabaseAdmin.from('organisation_members')
         .select('id,user_id,role_id,status,joined_at').eq('organisation_id', ctx.organisation.id).eq('id', ctx.params.id).maybeSingle();
       if (memberError) throw new Error(memberError.message);
       if (!member) return error('Organisation membership not found.', 404);
@@ -567,7 +567,7 @@ export const handler = router({
       }
       const nextRoleId = body.roleId === undefined ? member.role_id : text(body.roleId, 'reference');
       if (body.roleId !== undefined) {
-        const { data: role, error: roleError } = await adminClient.from('organisation_roles')
+        const { data: role, error: roleError } = await supabaseAdmin.from('organisation_roles')
           .select('id,key,permissions').eq('organisation_id', ctx.organisation.id).eq('id', nextRoleId).maybeSingle();
         if (roleError) throw new Error(roleError.message);
         if (!role) return error('The selected role does not belong to this organisation.', 400);
@@ -581,13 +581,13 @@ export const handler = router({
         return error('You cannot suspend your own organisation access.', 409);
       }
       if (changesAccess) {
-        const { data: ownerRoleRows, error: ownerRoleError } = await adminClient.from('organisation_roles')
+        const { data: ownerRoleRows, error: ownerRoleError } = await supabaseAdmin.from('organisation_roles')
           .select('id').eq('organisation_id', ctx.organisation.id).eq('key', 'owner');
         if (ownerRoleError) throw new Error(ownerRoleError.message);
         const ownerIds = (ownerRoleRows || []).map(row => row.id);
         if (member.status === 'active' && ownerIds.includes(member.role_id)
           && (nextStatus !== 'active' || !ownerIds.includes(nextRoleId))) {
-          const { count, error: ownerCountError } = await adminClient.from('organisation_members')
+          const { count, error: ownerCountError } = await supabaseAdmin.from('organisation_members')
             .select('id', { count: 'exact', head: true }).eq('organisation_id', ctx.organisation.id)
             .eq('status', 'active').in('role_id', ownerIds);
           if (ownerCountError) throw new Error(ownerCountError.message);
@@ -596,7 +596,7 @@ export const handler = router({
       }
       const update: Record<string, unknown> = { role_id: nextRoleId, status: nextStatus, updated_at: now() };
       if (nextStatus === 'active' && member.status !== 'active' && !member.joined_at) update.joined_at = now();
-      const { error: updateError } = await adminClient.from('organisation_members')
+      const { error: updateError } = await supabaseAdmin.from('organisation_members')
         .update(update).eq('organisation_id', ctx.organisation.id).eq('id', member.id);
       if (updateError) throw new Error(updateError.message);
       await securityLog(ctx, nextRoleId !== member.role_id ? 'member.role_changed' : 'member.status_changed',
@@ -604,26 +604,26 @@ export const handler = router({
       return json({ ok: true, status: nextStatus, roleId: nextRoleId });
     }],
     'DELETE /api/admin/users/:id': [requireAuth(), requireOrganisation(), requirePermission('users.manage'), async ctx => {
-      if (!ctx.organisation || !adminClient || !ctx.user) return error('Organisation context is unavailable.', 503);
-      const { data: member, error: memberError } = await adminClient.from('organisation_members')
+      if (!ctx.organisation || !supabaseAdmin || !ctx.user) return error('Organisation context is unavailable.', 503);
+      const { data: member, error: memberError } = await supabaseAdmin.from('organisation_members')
         .select('id,user_id,role_id,status').eq('organisation_id', ctx.organisation.id).eq('id', ctx.params.id).maybeSingle();
       if (memberError) throw new Error(memberError.message);
       if (!member) return error('Organisation membership not found.', 404);
       if (member.user_id === ctx.user.userId) return error('You cannot remove your own organisation membership.', 409);
       if (member.status === 'active') {
-        const { data: ownerRoles, error: ownerRoleError } = await adminClient.from('organisation_roles')
+        const { data: ownerRoles, error: ownerRoleError } = await supabaseAdmin.from('organisation_roles')
           .select('id').eq('organisation_id', ctx.organisation.id).eq('key', 'owner');
         if (ownerRoleError) throw new Error(ownerRoleError.message);
         const ownerIds = (ownerRoles || []).map(row => row.id);
         if (ownerIds.includes(member.role_id)) {
-          const { count, error: countError } = await adminClient.from('organisation_members')
+          const { count, error: countError } = await supabaseAdmin.from('organisation_members')
             .select('id', { count: 'exact', head: true }).eq('organisation_id', ctx.organisation.id)
             .eq('status', 'active').in('role_id', ownerIds);
           if (countError) throw new Error(countError.message);
           if ((count || 0) <= 1) return error('The last active organisation owner cannot be removed.', 409);
         }
       }
-      const { error: removeError } = await adminClient.from('organisation_members')
+      const { error: removeError } = await supabaseAdmin.from('organisation_members')
         .update({ status: 'removed', updated_at: now() }).eq('organisation_id', ctx.organisation.id).eq('id', member.id);
       if (removeError) throw new Error(removeError.message);
       await securityLog(ctx, 'member.removed', member.user_id, `Previous status: ${member.status}`);
