@@ -19,7 +19,7 @@ Do not deploy the pre-multitenancy application against a database after tenant-s
 
 ## If a migration fails
 
-- Each migration file uses an explicit transaction, so the failed file should roll back as a unit.
+- The Phase 1 multitenancy migrations added by this PR use explicit transaction blocks, so a failure inside one of those files should roll back that file as a unit. The two pre-existing baseline migrations do not both declare an explicit transaction block.
 - The full migration sequence is not one global transaction: earlier migration files may already have committed when a later file fails.
 - Stop the rollout. Inspect the migration history and database state before retrying. Do not blindly rerun migrations, use db reset, or delete migration-history rows.
 - Prefer a reviewed forward correction when the earlier migrations are valid. If the database must return to its exact pre-rollout state, use the verified backup restore procedure.
