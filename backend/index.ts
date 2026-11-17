@@ -548,7 +548,7 @@ export const handler = router({
       if (!ctx.organisation || !supabaseAdmin || !ctx.user) return error('Organisation context is unavailable.', 503);
       const body = ctx.body as Record<string, unknown>;
       const { data: member, error: memberError } = await supabaseAdmin.from('organisation_members')
-        .select('id,user_id,role_id,status').eq('organisation_id', ctx.organisation.id).eq('id', ctx.params.id).maybeSingle();
+        .select('id,user_id,role_id,status,joined_at').eq('organisation_id', ctx.organisation.id).eq('id', ctx.params.id).maybeSingle();
       if (memberError) throw new Error(memberError.message);
       if (!member) return error('Organisation membership not found.', 404);
 
@@ -588,7 +588,7 @@ export const handler = router({
         }
       }
       const update: Record<string, unknown> = { role_id: nextRoleId, status: nextStatus, updated_at: now() };
-      if (nextStatus === 'active' && !member.status) update.joined_at = now();
+      if (nextStatus === 'active' && member.status !== 'active' && !member.joined_at) update.joined_at = now();
       const { error: updateError } = await supabaseAdmin.from('organisation_members')
         .update(update).eq('organisation_id', ctx.organisation.id).eq('id', member.id);
       if (updateError) throw new Error(updateError.message);
