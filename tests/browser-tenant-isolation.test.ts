@@ -122,7 +122,7 @@ async function signIn(email: string) {
   });
   const { data, error } = await client.auth.signInWithPassword({ email, password });
   if (error || !data.session) throw error || new Error('Could not sign in browser-test identity.');
-  const storageKey = (client.auth as any).storageKey as string;
+  const storageKey = 'sb-' + new URL(supabaseUrl).hostname.split('.')[0] + '-auth-token';
   await client.auth.signOut();
   return { storageKey, session: data.session };
 }
@@ -181,8 +181,15 @@ test('browser workspace switching isolates two users and rejects a forged tenant
       localStorage.setItem(storageKey, JSON.stringify(session));
     }, sessionA);
     const pageA = await contextA.newPage();
+    pageA.on('console', message => console.log('[browser A]', message.type(), message.text()));
+    pageA.on('pageerror', error => console.error('[browser A pageerror]', error.message));
     await pageA.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-    await pageA.locator('#active-organisation').waitFor({ state: 'visible' });
+    try {
+      await pageA.locator('#active-organisation').waitFor({ state: 'visible', timeout: 15000 });
+    } catch {
+      const visibleText = await pageA.locator('body').innerText().catch(() => '<no body text>');
+      throw new Error('Browser A did not reach the organisation chooser. Auth storage key: ' + sessionA.storageKey + '. Page text: ' + visibleText.slice(0, 1000));
+    }
     await pageA.locator('#active-organisation').selectOption(orgA);
     await pageA.getByRole('button', { name: 'Continue' }).click();
     await pageA.locator('.app-shell').waitFor({ state: 'visible' });
