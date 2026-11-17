@@ -490,7 +490,11 @@ export const handler = router({
       let createdAuthUser = false;
       if (authUserId) {
         const { data: identity, error: identityError } = await supabaseAdmin.auth.admin.getUserById(authUserId);
-        if (identityError || !identity?.user) return error('The existing BidWatch profile has no valid Auth identity. Contact support.', 409);
+        if (identityError || !identity?.user
+          || String(identity.user.email || '').toLowerCase() !== email
+          || !identity.user.email_confirmed_at) {
+          return error('The existing BidWatch profile does not match a verified Auth identity for this email. Ask the person to sign in first.', 409);
+        }
       } else {
         const { data: invited, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
           data: { full_name: name || email.split('@')[0], name: name || email.split('@')[0] },
