@@ -550,8 +550,14 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
 
       // userB legitimately belongs to both organisations after the member-lifecycle
       // test. Use userA, who belongs only to orgA, to test a forged switch to orgB.
+      const { data: forgedMembership, error: forgedMembershipError } = await admin
+        .from('organisation_members').select('id,status')
+        .eq('organisation_id', orgB).eq('user_id', userA).eq('status', 'active');
+      assert.ifError(forgedMembershipError);
+      assert.deepEqual(forgedMembership, [], 'the fixture must not grant userA access to organisation B');
       const forged = await apiRequest(userA, orgB, '/api/tenders');
-      assert.equal(forged.status, 403, 'a real HTTP request cannot switch to an organisation without membership');
+      const forgedBody = await forged.json() as { error?: string };
+      assert.equal(forged.status, 403, `a real HTTP request cannot switch tenants; response: ${JSON.stringify(forgedBody)}`);
     });
 
     await t.test('database serializes concurrent last-owner exits', async () => {
