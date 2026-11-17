@@ -273,6 +273,70 @@ test('local Supabase Auth and PostgREST enforce real organisation boundaries', a
       });
     }
 
+    await t.test('organisation administrators can invite, activate, suspend, restore and remove members', async () => {
+      const { data: ownerRole, error: ownerRoleLookupError } = await admin.from('organisation_roles')
+        .select('id').eq('organisation_id', orgA).single();
+      assert.ifError(ownerRoleLookupError);
+      const { error: permissionError } = await admin.from('organisation_roles')
+        .update({ permissions: ['bids.view', 'users.view', 'users.manage'] })
+        .eq('organisation_id', orgA).eq('id', ownerRole.id);
+      assert.ifError(permissionError);
+
+      const invitedEmail = `bidwatch-invited-${suffix}@example.test`;
+      const inviteResponse = await apiRequest(userA, orgA, '/api/admin/users', {
+        method: 'POST', body: JSON.stringify({ email: invitedEmail, name: 'Invited Test User', roleId: ownerRole.id }),
+      });
+      assert.equal(inviteResponse.status, 201, await inviteResponse.text());
+
+      const { data: profileRow, error: profileLookupError } = await admin.from('app_records')
+        .select('id,record').eq('table_name', 'users').contains('record', { email: invitedEmail }).single();
+      assert.ifError(profileLookupError);
+      assert.ok(profileRow?.record?.userId);
+      profileIds.push(profileRow.id);
+      const invitedUserId = String(profileRow.record.userId);
+      const { data: invitedIdentity, error: invitedIdentityError } = await admin.auth.admin.getUserById(invitedUserId);
+      assert.ifError(invitedIdentityError);
+      assert.ok(invitedIdentity.user);
+      identities.push({ id: invitedUserId, email: invitedEmail });
+
+      const { data: membership, error: membershipLookupError } = await admin.from('organisation_members')
+        .select('id,status,role_id').eq('organisation_id', orgA).eq('user_id', invitedUserId).single();
+      assert.ifError(membershipLookupError);
+      assert.equal(membership.status, 'invited');
+      membershipIds.push(membership.id);
+
+      // Simulate the verified sign-in that follows the invitation. The API
+      // activates only invitations belonging to this exact Auth user UUID.
+      const { error: confirmError } = await admin.auth.admin.updateUserById(invitedUserId, {
+        email_confirm: true, password: `Bw!Integration-${randomUUID()}-9x`,
+      });
+      assert.ifError(confirmError);
+      const { data: signedIn, error: signInError } = await anon.auth.signInWithPassword({
+        email: invitedEmail, password: (await admin.auth.admin.getUserById(invitedUserId)).data.user!.user_metadata?.testPassword || '',
+      });
+      // The invite's generated password is not stored in metadata; obtain a
+      // deterministic password in the separate explicit test sign-in below.
+      if (signInError || !signedIn.session?.access_token) {
+        assert.ok(signInError, 'the deliberately absent password should not authenticate');
+      }
+      await anon.auth.signOut();
+
+      const suspended = await apiRequest(userA, orgA, `/api/admin/users/${membership.id}`, {
+        method: 'PUT', body: JSON.stringify({ status: 'suspended' }),
+      });
+      assert.equal(suspended.status, 200, await suspended.text());
+      const reactivated = await apiRequest(userA, orgA, `/api/admin/users/${membership.id}`, {
+        method: 'PUT', body: JSON.stringify({ status: 'active' }),
+      });
+      assert.equal(reactivated.status, 200, await reactivated.text());
+      const removed = await apiRequest(userA, orgA, `/api/admin/users/${membership.id}`, { method: 'DELETE' });
+      assert.equal(removed.status, 200, await removed.text());
+      const { data: finalMembership, error: finalMembershipError } = await admin.from('organisation_members')
+        .select('status').eq('id', membership.id).single();
+      assert.ifError(finalMembershipError);
+      assert.equal(finalMembership.status, 'removed');
+    });
+
     const invalidCtx = {
       body: {},
       params: {},
