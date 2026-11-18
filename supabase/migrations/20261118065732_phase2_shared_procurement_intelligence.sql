@@ -242,6 +242,7 @@ grant select, insert, update, delete on table
 to service_role;
 
 -- Source observation versions are append-only for the application service.
+revoke all on table public.procurement_observation_versions from public, anon, authenticated, service_role;
 grant select, insert on table public.procurement_observation_versions to service_role;
 
 commit;
