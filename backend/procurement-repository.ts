@@ -167,7 +167,7 @@ function boundedLimit(value: number | undefined): number {
 function validCursor(cursor: OpportunityCursor): boolean {
   if (!UUID_PATTERN.test(cursor.id) || typeof cursor.updatedAt !== 'string') return false;
 
-  const match = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.(\\d{1,6}))?(Z|([+-])(\\d{2}):(\\d{2}))$/.exec(cursor.updatedAt);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(cursor.updatedAt);
   if (!match) return false;
 
   const [, yearText, monthText, dayText, hourText, minuteText, secondText, , zone, , zoneHourText, zoneMinuteText] = match;
