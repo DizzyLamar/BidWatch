@@ -156,12 +156,16 @@ create table public.organisation_opportunities (
   matched_categories jsonb not null default '[]'::jsonb,
   matched_terms jsonb not null default '[]'::jsonb,
   classification_reason text,
-  owner_user_id uuid references auth.users(id) on delete set null,
+  owner_user_id uuid,
   dismissed_at timestamptz,
   converted_tender_id uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint organisation_opportunities_org_canonical_unique unique (organisation_id, canonical_opportunity_id),
+  constraint organisation_opportunities_owner_membership_fk
+    foreign key (organisation_id, owner_user_id)
+    references public.organisation_members (organisation_id, user_id)
+    on delete set null (owner_user_id),
   constraint organisation_opportunities_state_check check (
     state in ('new', 'watching', 'qualifying', 'pursuing', 'dismissed', 'converted')
   ),
