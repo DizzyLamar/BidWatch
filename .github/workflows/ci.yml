@@ -64,11 +64,6 @@ jobs:
           echo "SUPABASE_DB_PORT=$((55000 + GITHUB_RUN_NUMBER % 1000))" >> "$GITHUB_ENV"
           echo "BROWSER_TEST_PORT=$((4173 + GITHUB_RUN_NUMBER % 1000))" >> "$GITHUB_ENV"
 
-      - name: Install Playwright browser runtime
-        run: |
-          npm install --no-save --package-lock=false playwright
-          npx playwright install --with-deps chromium
-
       - name: Start local Supabase (Auth, PostgREST, Database and Storage)
         run: npx supabase start --exclude realtime,imgproxy,studio,edge-runtime,analytics,vector,supavisor
 
@@ -86,6 +81,8 @@ jobs:
           npm run build
           npm run test:integration
           npx tsx scripts/migrate-legacy-attachments.ts
+          npm install --no-save --package-lock=false playwright
+          npx playwright install --with-deps chromium
           npm run test:browser
 
       - name: Stop local Supabase
