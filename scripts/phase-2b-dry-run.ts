@@ -287,17 +287,25 @@ function assertLocalDryRunConfiguration() {
   return { url: url.toString(), key };
 }
 
-async function readAllRows(client: any, query: (builder: any) => any): Promise<LegacyRow[]> {
+export async function readAllRows(client: any, query: (builder: any) => any): Promise<LegacyRow[]> {
   const rows: LegacyRow[] = [];
   const pageSize = 500;
-  for (let from = 0; ; from += pageSize) {
-    const result = await query(client.from('app_records').select('id,table_name,record,scope_type,organisation_id')
-      .order('id', { ascending: true }))
-      .range(from, from + pageSize - 1);
+  let lastId: string | null = null;
+  for (;;) {
+    let builder = client.from('app_records').select('id,table_name,record,scope_type,organisation_id')
+      .order('id', { ascending: true });
+    // Keyset pagination avoids offset shifts when rows are inserted or deleted
+    // before the current page while a multi-request local inventory is running.
+    if (lastId !== null) builder = builder.gt('id', lastId);
+    const result = await query(builder).limit(pageSize);
     if (result.error) throw new Error('Read-only legacy inventory query failed: ' + result.error.message);
     const page = (result.data || []) as LegacyRow[];
+    if (page.length && lastId !== null && page[0].id <= lastId) {
+      throw new Error('Legacy inventory paging did not advance beyond the previous UUID cursor.');
+    }
     rows.push(...page);
     if (page.length < pageSize) break;
+    lastId = page[page.length - 1].id;
   }
   return rows;
 }
