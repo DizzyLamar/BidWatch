@@ -128,6 +128,10 @@ export function buildPhase2BDryRunReport(input: {
     }
     if (item.state === 'imported') {
       const tenderId = typeof item.importedTenderId === 'string' ? item.importedTenderId : '';
+      if (!UUID.test(tenderId)) {
+        addFinding(findings, row, 'imported_tender_invalid_id', 'Imported state must reference a valid legacy tender UUID.');
+        continue;
+      }
       const tender = tenderById.get(tenderId);
       if (!tender) addFinding(findings, row, 'imported_tender_missing', 'Imported state does not resolve to an existing legacy tender record.');
       else if (tender.scope_type !== 'organisation' || tender.organisation_id !== organisationId) {
@@ -192,7 +196,7 @@ export function buildPhase2BDryRunReport(input: {
     'invalid_record_id', 'invalid_record_shape', 'scope_mismatch', 'unknown_source', 'missing_title', 'invalid_notice_url',
     'invalid_first_seen', 'invalid_last_seen', 'seen_order_invalid', 'unknown_update_state',
     'invalid_fit_level', 'invalid_relevance_score', 'invalid_categories', 'invalid_matched_terms',
-    'invalid_details', 'invalid_documents', 'dismissal_timestamp_unresolved', 'imported_tender_missing',
+    'invalid_details', 'invalid_documents', 'dismissal_timestamp_unresolved', 'imported_tender_invalid_id', 'imported_tender_missing',
     'imported_tender_scope_mismatch', 'imported_tender_invalid',
   ]);
   const blockedUpdateIds = new Set(findings.filter(f => f.collection === 'opportunity_updates' && blockingCodes.has(f.code)).map(f => f.recordId));
@@ -242,7 +246,7 @@ export function buildPhase2BDryRunReport(input: {
       quarantinedSourceRunCandidates: blockedRunIds.size,
       findingCount: findings.length,
       findingsByCode: countBy(findings, finding => finding.code),
-      sampleFindings: findings.slice(0, 1000),
+      findings,
     },
     history,
     canonicalisation: {
@@ -312,8 +316,9 @@ export async function collectPhase2BDryRunReport(client: any) {
     builder.eq('table_name', 'opportunity_source_runs'));
   const updates = organisationRows.filter(row => row.table_name === 'opportunity_updates');
   const importedTenderIds = [...new Set(updates
-    .filter(row => row.record.state === 'imported' && typeof row.record.importedTenderId === 'string')
-    .map(row => String(row.record.importedTenderId)))];
+    .filter(row => isObject(row.record) && row.record.state === 'imported' &&
+      typeof row.record.importedTenderId === 'string' && UUID.test(row.record.importedTenderId))
+    .map(row => String((row.record as Record<string, unknown>).importedTenderId)))];
   const organisationTenderRows = await readAllRows(client, builder => builder
     .eq('table_name', 'tenders')
     .eq('organisation_id', organisationId));
