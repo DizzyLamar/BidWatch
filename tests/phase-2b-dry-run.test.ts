@@ -161,6 +161,27 @@ test('local Supabase URL guard accepts IPv4, hostname and bracketed IPv6 loopbac
   assert.equal(parseLocalSupabaseUrl('http://127.0.0.1:54321').hostname, '127.0.0.1');
   assert.equal(parseLocalSupabaseUrl('http://[::1]:54321').hostname, '[::1]');
   assert.throws(() => parseLocalSupabaseUrl('https://supabase.example.com'), /permanently restricted to localhost/);
+  assert.throws(() => parseLocalSupabaseUrl('ftp://localhost:54321'), /permanently restricted to localhost/);
   assert.throws(() => parseLocalSupabaseUrl('http://localhost:54321@evil.example'), /permanently restricted to localhost/);
   assert.throws(() => parseLocalSupabaseUrl('http://user:pass@localhost:54321'), /permanently restricted to localhost/);
+});
+
+test('dry-run quarantines non-object JSON records without aborting the report', () => {
+  const malformed = null as unknown as Record<string, unknown>;
+  const report = buildPhase2BDryRunReport({
+    organisationId: ORG,
+    rows: [
+      row(UPDATE, 'opportunity_updates', malformed),
+      row(RUN, 'opportunity_source_runs', malformed, 'global', null),
+      row(CHANGE, 'opportunity_changes', malformed),
+    ],
+  });
+  assert.equal(report.validation.updateRecords, 1);
+  assert.equal(report.validation.quarantinedUpdateCandidates, 1);
+  assert.equal(report.validation.migratableUpdateCandidates, 0);
+  assert.equal(report.validation.quarantinedSourceRunCandidates, 1);
+  assert.equal(report.validation.migratableSourceRunCandidates, 0);
+  assert.equal(report.validation.findingsByCode.invalid_record_shape, 3);
+  assert.equal(report.history.legacyChangeRecords, 1);
+  assert.equal(report.history.changesLinkedToKnownUpdates, 0);
 });
