@@ -85,7 +85,7 @@ export function buildPhase2BDryRunReport(input: {
   const allTenders = rows.filter(row => row.table_name === 'tenders');
   const tenders = allTenders.filter(row => row.scope_type === 'organisation' && row.organisation_id === organisationId);
   const updateById = new Map(updates.map(row => [row.id, row]));
-  const tenderById = new Map(allTenders.map(row => [row.id, row]));
+  const tenderById = new Map(allTenders.map(row => [row.id.toLowerCase(), row]));
 
   for (const row of updates) {
     if (!isObject(row.record)) {
@@ -132,7 +132,7 @@ export function buildPhase2BDryRunReport(input: {
         addFinding(findings, row, 'imported_tender_invalid_id', 'Imported state must reference a valid legacy tender UUID.');
         continue;
       }
-      const tender = tenderById.get(tenderId);
+      const tender = tenderById.get(tenderId.toLowerCase());
       if (!tender) addFinding(findings, row, 'imported_tender_missing', 'Imported state does not resolve to an existing legacy tender record.');
       else if (tender.scope_type !== 'organisation' || tender.organisation_id !== organisationId) {
         addFinding(findings, row, 'imported_tender_scope_mismatch', 'Referenced tender is not in the same legacy organisation.');
