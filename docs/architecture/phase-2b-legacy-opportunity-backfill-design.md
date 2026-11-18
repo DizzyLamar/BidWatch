@@ -2,7 +2,7 @@
 
 **Status:** design only; no migration or backfill implemented  
 **Design baseline:** Phase 2A head `991ec334f9ee3cd97ebe22c29915ea2ee3e034e9`  
-**Branch:** `phase-2b/backfill-design`
+**Implementation branch:** `phase-2b/dry-run-tooling`
 
 ## 1. Purpose and non-goals
 
