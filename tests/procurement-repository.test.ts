@@ -82,6 +82,15 @@ test('opportunity pages use a stable composite cursor and return the next page t
       && String(call.args[0]).includes('updated_at.lt.2026-11-18T09:00:00.000Z')
       && String(call.args[0]).includes('id.lt.33333333-3333-4333-8333-333333333333')
   ));
+
+  const precisionFake = fakeClient({ data: [], error: null });
+  const precisionRepository = createProcurementReadRepository(precisionFake.client, () => scope);
+  await precisionRepository.listOrganisationOpportunitiesPage({
+    cursor: { updatedAt: '2026-11-18T09:00:00.123456+00:00', id: rows[1].id },
+  });
+  assert.ok(precisionFake.calls.some(call =>
+    call.method === 'or' && String(call.args[0]).includes('updated_at.lt.2026-11-18T09:00:00.123456+00:00')
+  ));
 });
 
 test('invalid pagination cursors are rejected before querying Supabase', async () => {
