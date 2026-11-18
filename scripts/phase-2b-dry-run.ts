@@ -238,7 +238,7 @@ function assertLocalDryRunConfiguration() {
   return { url: url.toString(), key };
 }
 
-async function readAllRows(client: ReturnType<typeof createClient>, query: (builder: any) => any): Promise<LegacyRow[]> {
+async function readAllRows(client: any, query: (builder: any) => any): Promise<LegacyRow[]> {
   const rows: LegacyRow[] = [];
   const pageSize = 500;
   for (let from = 0; ; from += pageSize) {
