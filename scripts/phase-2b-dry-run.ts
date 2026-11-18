@@ -253,9 +253,7 @@ async function readAllRows(client: any, query: (builder: any) => any): Promise<L
   return rows;
 }
 
-async function main() {
-  const { url, key } = assertLocalDryRunConfiguration();
-  const client = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+export async function collectPhase2BDryRunReport(client: any) {
   const orgResult = await client.from('organisations').select('id,slug').eq('slug', 'legacy-bidwatch-workspace');
   if (orgResult.error) throw new Error('Could not resolve legacy organisation: ' + orgResult.error.message);
   if (!Array.isArray(orgResult.data) || orgResult.data.length !== 1) {
@@ -265,7 +263,13 @@ async function main() {
   const rows = await readAllRows(client, builder => builder.in('table_name', [
     'opportunity_updates', 'opportunity_changes', 'opportunity_source_runs', 'tenders',
   ]));
-  const report = buildPhase2BDryRunReport({ organisationId, rows });
+  return buildPhase2BDryRunReport({ organisationId, rows });
+}
+
+async function main() {
+  const { url, key } = assertLocalDryRunConfiguration();
+  const client = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const report = await collectPhase2BDryRunReport(client);
   const outputPath = resolve(process.env.PHASE2B_REPORT_PATH || 'artifacts/phase-2b-dry-run.json');
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(report, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
