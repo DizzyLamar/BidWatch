@@ -49,6 +49,15 @@ export async function bootstrapFirstPlatformAdmin(admin: any, userId: string) {
     throw new Error('The first platform owner must have a verified email address.');
   }
 
+  const { data: existingPlatformAdmin, error: existingAdminError } = await admin
+    .from('platform_admins').select('user_id').eq('user_id', userId).maybeSingle();
+  if (existingAdminError) throw new Error(`Could not inspect platform administrator state: ${existingAdminError.message}`);
+
+  const { data: existingMemberships, error: existingMembershipError } = await admin
+    .from('organisation_members').select('id').eq('user_id', userId).limit(1);
+  if (existingMembershipError) throw new Error(`Could not inspect existing organisation memberships: ${existingMembershipError.message}`);
+  const needsInitialWorkspaceMembership = !existingMemberships?.length;
+
   const { data: organisation, error: organisationError } = await admin
     .from('organisations').select('id,name').eq('slug', 'legacy-bidwatch-workspace').maybeSingle();
   if (organisationError) throw new Error(`Could not inspect the initial workspace: ${organisationError.message}`);
@@ -92,32 +101,36 @@ export async function bootstrapFirstPlatformAdmin(admin: any, userId: string) {
     if (profileInsertError) throw new Error(`Could not create the global user profile: ${profileInsertError.message}`);
   }
 
-  const { error: membershipError } = await admin.from('organisation_members').upsert({
-    organisation_id: organisation.id,
-    user_id: userId,
-    role_id: ownerRole.id,
-    status: 'active',
-    joined_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'organisation_id,user_id' });
-  if (membershipError) throw new Error(`Could not provision the initial owner membership: ${membershipError.message}`);
+  if (needsInitialWorkspaceMembership) {
+    const { error: membershipError } = await admin.from('organisation_members').upsert({
+      organisation_id: organisation.id,
+      user_id: userId,
+      role_id: ownerRole.id,
+      status: 'active',
+      joined_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'organisation_id,user_id' });
+    if (membershipError) throw new Error(`Could not provision the initial owner membership: ${membershipError.message}`);
+  }
 
   const { error: adminError } = await admin.from('platform_admins')
     .upsert({ user_id: userId, created_by: userId }, { onConflict: 'user_id', ignoreDuplicates: true });
   if (adminError) throw new Error(`Could not provision platform administrator: ${adminError.message}`);
 
-  const [{ data: verifiedMembership, error: verifyMembershipError }, { data: verifiedAdmin, error: verifyAdminError }] = await Promise.all([
-    admin.from('organisation_members').select('user_id,role_id,status')
-      .eq('organisation_id', organisation.id).eq('user_id', userId).maybeSingle(),
-    admin.from('platform_admins').select('user_id').eq('user_id', userId).maybeSingle(),
-  ]);
-  if (verifyMembershipError || verifyAdminError) {
-    throw new Error(verifyMembershipError?.message || verifyAdminError?.message || 'Could not verify first-owner provisioning.');
+  const { data: verifiedAdmin, error: verifyAdminError } = await admin.from('platform_admins')
+    .select('user_id').eq('user_id', userId).maybeSingle();
+  if (verifyAdminError) throw new Error(`Could not verify platform administrator: ${verifyAdminError.message}`);
+  if (verifiedAdmin?.user_id !== userId) throw new Error('Platform administrator provisioning did not pass final verification.');
+
+  if (needsInitialWorkspaceMembership) {
+    const { data: verifiedMembership, error: verifyMembershipError } = await admin.from('organisation_members')
+      .select('user_id,role_id,status').eq('organisation_id', organisation.id).eq('user_id', userId).maybeSingle();
+    if (verifyMembershipError) throw new Error(`Could not verify initial owner membership: ${verifyMembershipError.message}`);
+    if (verifiedMembership?.status !== 'active' || verifiedMembership?.role_id !== ownerRole.id) {
+      throw new Error('Initial owner membership did not pass final verification.');
+    }
   }
-  if (verifiedMembership?.status !== 'active' || verifiedMembership?.role_id !== ownerRole.id || verifiedAdmin?.user_id !== userId) {
-    throw new Error('First-owner provisioning did not pass its final verification.');
-  }
-  return { userId, organisationId: organisation.id, ownerRoleId: ownerRole.id, alreadyProvisioned: Boolean(existingProfile) };
+  return { userId, organisationId: organisation.id, ownerRoleId: ownerRole.id, alreadyProvisioned: Boolean(existingPlatformAdmin), ownerMembershipProvisioned: needsInitialWorkspaceMembership };
 }
 
 async function main() {
