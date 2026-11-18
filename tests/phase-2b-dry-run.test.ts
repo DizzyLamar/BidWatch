@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPhase2BDryRunReport, parseLocalSupabaseUrl } from '../scripts/phase-2b-dry-run';
+import { buildPhase2BDryRunReport, parseLocalSupabaseUrl, readAllRows } from '../scripts/phase-2b-dry-run';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
 const UPDATE = '22222222-2222-4222-8222-222222222222';
@@ -223,4 +223,43 @@ test('dry-run matches imported tender UUIDs regardless of hexadecimal case', () 
   assert.equal(report.validation.migratableUpdateCandidates, 1);
   assert.equal(report.validation.quarantinedUpdateCandidates, 0);
   assert.equal(report.validation.findingsByCode.imported_tender_missing, undefined);
+});
+
+
+test('legacy inventory keyset pagination does not skip rows when earlier UUIDs are deleted mid-scan', async () => {
+  const initial = Array.from({ length: 1001 }, (_, index) => ({
+    id: '00000000-0000-4000-8000-' + (index + 1).toString().padStart(12, '0'),
+    table_name: 'opportunity_updates',
+    record: { index: index + 1 },
+    scope_type: 'organisation',
+    organisation_id: ORG,
+  }));
+  let records = [...initial];
+  let requests = 0;
+  const client = {
+    from: () => ({
+      select: () => ({
+        order: () => {
+          let cursor: string | null = null;
+          return {
+            gt: (_column: string, value: string) => { cursor = value; return this; },
+            limit: async (pageSize: number) => {
+              requests += 1;
+              const page = records.filter(item => cursor === null || item.id > cursor).slice(0, pageSize);
+              // Simulate a concurrent deletion before the next request. Offset
+              // pagination would now skip the first row of the following page.
+              if (requests === 1) records = records.filter(item => item.id !== initial[9].id);
+              return { data: page, error: null };
+            },
+          };
+        },
+      }),
+    }),
+  };
+  const rows = await readAllRows(client, builder => builder as any);
+  const ids = rows.map(item => item.id);
+  assert.equal(requests, 3);
+  assert.equal(ids.length, initial.length);
+  assert.equal(new Set(ids).size, initial.length);
+  assert.deepEqual(ids, initial.map(item => item.id));
 });
