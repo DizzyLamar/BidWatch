@@ -185,3 +185,27 @@ test('dry-run quarantines non-object JSON records without aborting the report', 
   assert.equal(report.history.legacyChangeRecords, 1);
   assert.equal(report.history.changesLinkedToKnownUpdates, 0);
 });
+
+test('dry-run quarantines malformed imported tender UUIDs without a tender lookup', () => {
+  const report = buildPhase2BDryRunReport({
+    organisationId: ORG,
+    rows: [row(UPDATE, 'opportunity_updates', update({
+      state: 'imported', importedTenderId: 'not-a-uuid',
+    }))],
+  });
+  assert.equal(report.validation.quarantinedUpdateCandidates, 1);
+  assert.equal(report.validation.findingsByCode.imported_tender_invalid_id, 1);
+  assert.equal(report.validation.findingsByCode.imported_tender_missing, undefined);
+});
+
+test('dry-run report retains every quarantine finding above 1,000 records', () => {
+  const rows = Array.from({ length: 1005 }, (_, index) => {
+    const id = '00000000-0000-4000-8000-' + index.toString(16).padStart(12, '0');
+    return row(id, 'opportunity_updates', update({ url: 'javascript:invalid' }));
+  });
+  const report = buildPhase2BDryRunReport({ organisationId: ORG, rows });
+  assert.equal(report.validation.findingCount, 1005);
+  assert.equal(report.validation.findings.length, 1005);
+  assert.equal(report.validation.findings[0].code, 'invalid_notice_url');
+  assert.equal(report.validation.findings[1004].code, 'invalid_notice_url');
+});
