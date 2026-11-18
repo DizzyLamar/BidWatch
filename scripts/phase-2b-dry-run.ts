@@ -35,9 +35,11 @@ function validTimestamp(value: unknown): boolean {
   if (typeof value !== 'string' || !ISO_DATE.test(value)) return false;
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) return false;
-  const datePart = value.slice(0, 10);
-  const [year, month, day] = datePart.split('-').map(Number);
-  return parsed.getUTCFullYear() >= year && month >= 1 && month <= 12 && day >= 1 && day <= 31;
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  const [hour, minute, second] = value.slice(11, 19).split(':').map(Number);
+  const calendar = new Date(Date.UTC(year, month - 1, day));
+  return calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month - 1 &&
+    calendar.getUTCDate() === day && hour <= 23 && minute <= 59 && second <= 59;
 }
 function validHttpUrl(value: unknown): boolean {
   if (typeof value !== 'string' || !value.trim()) return false;
@@ -101,8 +103,8 @@ export function buildPhase2BDryRunReport(input: {
     if (isObject(item.details) && item.details.documents != null && !Array.isArray(item.details.documents)) {
       addFinding(findings, row, 'invalid_documents', 'details.documents must be an array when present.');
     }
-    if (item.state === 'dismissed') {
-      addFinding(findings, row, 'dismissal_timestamp_unresolved', 'The legacy update shape does not define a verified dismissedAt timestamp; do not invent dismissed_at.');
+    if (item.state === 'dismissed' && !validTimestamp(item.dismissedAt)) {
+      addFinding(findings, row, 'dismissal_timestamp_unresolved', 'No valid legacy dismissedAt timestamp exists; do not invent dismissed_at.');
     }
     if (item.state === 'imported') {
       const tenderId = typeof item.importedTenderId === 'string' ? item.importedTenderId : '';
@@ -206,9 +208,9 @@ export function buildPhase2BDryRunReport(input: {
       sourceRunRecords: runs.length,
       migratableSourceRunCandidates: runs.length - blockedRunIds.size,
       quarantinedSourceRunCandidates: blockedRunIds.size,
-      findings: findings.length,
+      findingCount: findings.length,
       findingsByCode: countBy(findings, finding => finding.code),
-      findings: findings.slice(0, 1000),
+      sampleFindings: findings.slice(0, 1000),
     },
     history,
     canonicalisation: {
