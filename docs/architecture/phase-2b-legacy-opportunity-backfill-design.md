@@ -198,3 +198,25 @@ Before any hosted migration or backfill:
 7. Application reads/writes must remain on the legacy path until a separate cutover plan and explicit approval.
 
 No Phase 2B production action is authorised by this design document.
+
+
+## 9. Running the read-only dry-run
+
+Run only against the local Supabase stack. Do not use a hosted project URL, `--remote`, production environment variables, or a production service-role key.
+
+```bash
+npx supabase start
+eval "$(npx supabase status -o env)"
+
+export LOCAL_SUPABASE_URL="$API_URL"
+export LOCAL_SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+export PHASE2B_DRY_RUN=1
+
+npm run phase2b:dry-run
+```
+
+The command refuses to start unless the explicit dry-run flag is set and the configured hostname is `localhost`, `127.0.0.1`, or `::1`. It uses dedicated local-only environment variable names and does not fall back to the application's normal Supabase variables.
+
+By default, the JSON report is written to `artifacts/phase-2b-dry-run.json`. Override the destination with `PHASE2B_REPORT_PATH`. The report contains record IDs, counts and validation messages, but not raw scraped payloads.
+
+A freshly reset local database may contain no legacy discovery records; in that case the inventory will correctly report zero. The local Supabase integration test inserts temporary synthetic records, executes the same inventory function, verifies the expected quarantine and migration-candidate counts, checks that the records are unchanged, and removes the fixtures. It never uses production data.
