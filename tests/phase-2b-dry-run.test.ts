@@ -126,3 +126,32 @@ test('dry-run quarantines imported references to structurally invalid same-organ
   assert.equal(report.validation.quarantinedUpdateCandidates, 1);
   assert.equal(report.validation.findingsByCode.imported_tender_invalid, 1);
 });
+
+test('dry-run excludes other organisations from the legacy baseline but detects foreign tender references', () => {
+  const otherOrg = '99999999-9999-4999-8999-999999999999';
+  const foreignUpdate = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const foreignChange = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const report = buildPhase2BDryRunReport({
+    organisationId: ORG,
+    rows: [
+      row(UPDATE, 'opportunity_updates', update()),
+      row(foreignUpdate, 'opportunity_updates', update({ reference: 'OTHER/001' }), 'organisation', otherOrg),
+      row(foreignChange, 'opportunity_changes', {
+        opportunityUpdateId: foreignUpdate,
+        detectedAt: '2026-11-03T10:00:00.000Z',
+        changedFields: ['title'],
+        before: { title: 'Old title' },
+        after: { title: 'New title' },
+      }, 'organisation', otherOrg),
+      row(TENDER, 'tenders', { title: 'Foreign tender' }, 'organisation', otherOrg),
+      row('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'opportunity_updates', update({
+        reference: 'TEST/FOREIGN-TENDER', state: 'imported', importedTenderId: TENDER,
+      })),
+    ],
+  });
+  assert.equal(report.baseline.collections.opportunity_updates, 2);
+  assert.equal(report.baseline.collections.opportunity_changes, 0);
+  assert.equal(report.baseline.collections.tenders, 0);
+  assert.equal(report.validation.findingsByCode.scope_mismatch, undefined);
+  assert.equal(report.validation.findingsByCode.imported_tender_scope_mismatch, 1);
+});
