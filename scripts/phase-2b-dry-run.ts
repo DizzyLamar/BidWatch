@@ -248,8 +248,13 @@ export function parseLocalSupabaseUrl(urlValue: string): URL {
   const url = new URL(urlValue);
   // WHATWG URL serializes IPv6 hostnames with brackets (for example, "[::1]").
   // Strip those brackets before comparing against the literal loopback allowlist.
-  const hostname = url.hostname.replace(/^\\[|\\]$/g, '').toLowerCase();
-  if (!['localhost', '127.0.0.1', '::1'].includes(hostname) || url.username || url.password) {
+  const rawHostname = url.hostname;
+  const hostname = (rawHostname.startsWith('[') && rawHostname.endsWith(']')
+    ? rawHostname.slice(1, -1)
+    : rawHostname).toLowerCase();
+  if (!['http:', 'https:'].includes(url.protocol)
+    || !['localhost', '127.0.0.1', '::1'].includes(hostname)
+    || url.username || url.password) {
     throw new Error('Refusing non-local Supabase host. This tool is permanently restricted to localhost.');
   }
   return url;
