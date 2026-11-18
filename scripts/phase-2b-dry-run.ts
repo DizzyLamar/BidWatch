@@ -88,6 +88,10 @@ export function buildPhase2BDryRunReport(input: {
   const tenderById = new Map(allTenders.map(row => [row.id, row]));
 
   for (const row of updates) {
+    if (!isObject(row.record)) {
+      addFinding(findings, row, 'invalid_record_shape', 'Legacy opportunity update record must be a JSON object.');
+      continue;
+    }
     const item = row.record;
     if (!UUID.test(row.id)) addFinding(findings, row, 'invalid_record_id', 'Legacy app_records ID is not a UUID.');
     if (row.scope_type !== 'organisation' || row.organisation_id !== organisationId) {
@@ -135,6 +139,10 @@ export function buildPhase2BDryRunReport(input: {
   }
 
   for (const row of runs) {
+    if (!isObject(row.record)) {
+      addFinding(findings, row, 'invalid_record_shape', 'Legacy source run record must be a JSON object.');
+      continue;
+    }
     const run = row.record;
     if (row.scope_type !== 'global' || row.organisation_id !== null) {
       addFinding(findings, row, 'run_scope_mismatch', 'Source run should be globally scoped in the Phase 1 legacy store.');
@@ -153,6 +161,10 @@ export function buildPhase2BDryRunReport(input: {
   }
 
   for (const row of changes) {
+    if (!isObject(row.record)) {
+      addFinding(findings, row, 'invalid_record_shape', 'Legacy opportunity change record must be a JSON object.');
+      continue;
+    }
     const change = row.record;
     if (row.scope_type !== 'organisation' || row.organisation_id !== organisationId) {
       addFinding(findings, row, 'change_scope_mismatch', 'Opportunity change is not scoped to the resolved legacy organisation.');
@@ -177,21 +189,23 @@ export function buildPhase2BDryRunReport(input: {
   }
 
   const blockingCodes = new Set([
-    'invalid_record_id', 'scope_mismatch', 'unknown_source', 'missing_title', 'invalid_notice_url',
+    'invalid_record_id', 'invalid_record_shape', 'scope_mismatch', 'unknown_source', 'missing_title', 'invalid_notice_url',
     'invalid_first_seen', 'invalid_last_seen', 'seen_order_invalid', 'unknown_update_state',
     'invalid_fit_level', 'invalid_relevance_score', 'invalid_categories', 'invalid_matched_terms',
     'invalid_details', 'invalid_documents', 'dismissal_timestamp_unresolved', 'imported_tender_missing',
     'imported_tender_scope_mismatch', 'imported_tender_invalid',
   ]);
   const blockedUpdateIds = new Set(findings.filter(f => f.collection === 'opportunity_updates' && blockingCodes.has(f.code)).map(f => f.recordId));
-  const runBlocking = new Set(['run_scope_mismatch', 'unknown_run_source', 'unknown_run_status', 'unknown_scan_type',
+  const runBlocking = new Set(['invalid_record_shape', 'run_scope_mismatch', 'unknown_run_source', 'unknown_run_status', 'unknown_scan_type',
     'invalid_fetchedCount', 'invalid_parsedCount', 'invalid_relevantCount', 'invalid_failedCount', 'invalid_checked_at', 'invalid_duration']);
   const blockedRunIds = new Set(findings.filter(f => f.collection === 'opportunity_source_runs' && runBlocking.has(f.code)).map(f => f.recordId));
 
   const history = {
     legacyChangeRecords: changes.length,
-    changesLinkedToKnownUpdates: changes.filter(row => updateById.has(String(row.record.opportunityUpdateId))).length,
-    changesWithValidTimestamps: changes.filter(row => validTimestamp(row.record.detectedAt)).length,
+    changesLinkedToKnownUpdates: changes.filter(row =>
+      isObject(row.record) && updateById.has(String(row.record.opportunityUpdateId))).length,
+    changesWithValidTimestamps: changes.filter(row =>
+      isObject(row.record) && validTimestamp(row.record.detectedAt)).length,
     reconstructableFullSnapshots: 0,
     note: 'This pass validates sparse before/after deltas only. It does not claim complete baseline snapshots or generate observation versions.',
   };
@@ -214,10 +228,10 @@ export function buildPhase2BDryRunReport(input: {
         opportunity_source_runs: runs.length,
         tenders: tenders.length,
       },
-      updatesBySource: countBy(updates, row => String(row.record.sourceId || '')),
-      updatesByState: countBy(updates, row => String(row.record.state || '')),
-      sourceRunsBySource: countBy(runs, row => String(row.record.sourceId || '')),
-      sourceRunsByStatus: countBy(runs, row => String(row.record.status || '')),
+      updatesBySource: countBy(updates, row => isObject(row.record) ? String(row.record.sourceId || '') : '(invalid record)'),
+      updatesByState: countBy(updates, row => isObject(row.record) ? String(row.record.state || '') : '(invalid record)'),
+      sourceRunsBySource: countBy(runs, row => isObject(row.record) ? String(row.record.sourceId || '') : '(invalid record)'),
+      sourceRunsByStatus: countBy(runs, row => isObject(row.record) ? String(row.record.status || '') : '(invalid record)'),
     },
     validation: {
       updateRecords: updates.length,
