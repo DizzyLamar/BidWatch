@@ -6,6 +6,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: bidwatch-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -42,9 +46,6 @@ jobs:
     name: Local Supabase tenant isolation
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      # Avoid collisions with a PostgreSQL listener on the runner's default 54322.
-      SUPABASE_DB_PORT: 55432
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,6 +58,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Select isolated local service ports
+        run: |
+          echo "SUPABASE_DB_PORT=$((55000 + GITHUB_RUN_NUMBER % 1000))" >> "$GITHUB_ENV"
+          echo "BROWSER_TEST_PORT=$((4173 + GITHUB_RUN_NUMBER % 1000))" >> "$GITHUB_ENV"
 
       - name: Install Playwright browser runtime
         run: |
@@ -76,7 +82,7 @@ jobs:
           export SUPABASE_SECRET_KEY="$SERVICE_ROLE_KEY"
           export VITE_SUPABASE_URL="$API_URL"
           export VITE_SUPABASE_PUBLISHABLE_KEY="$ANON_KEY"
-          export BROWSER_TEST_PORT=4173
+          export BROWSER_TEST_PORT="$BROWSER_TEST_PORT"
           npm run build
           npm run test:integration
           npx tsx scripts/migrate-legacy-attachments.ts
