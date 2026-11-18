@@ -242,7 +242,8 @@ async function readAllRows(client: ReturnType<typeof createClient>, query: (buil
   const rows: LegacyRow[] = [];
   const pageSize = 500;
   for (let from = 0; ; from += pageSize) {
-    const result = await query(client.from('app_records').select('id,table_name,record,scope_type,organisation_id'))
+    const result = await query(client.from('app_records').select('id,table_name,record,scope_type,organisation_id')
+      .order('id', { ascending: true }))
       .range(from, from + pageSize - 1);
     if (result.error) throw new Error('Read-only legacy inventory query failed: ' + result.error.message);
     const page = (result.data || []) as LegacyRow[];
