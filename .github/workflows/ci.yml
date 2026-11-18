@@ -79,6 +79,11 @@ jobs:
           export BROWSER_TEST_PORT=4173
           npm run build
           npm run test:integration
+          export LOCAL_SUPABASE_URL="$API_URL"
+          export LOCAL_SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+          export PHASE2B_DRY_RUN=1
+          export PHASE2B_REPORT_PATH="artifacts/phase-2b-ci-dry-run.json"
+          npm run phase2b:dry-run
           npx tsx scripts/migrate-legacy-attachments.ts
           npm run test:browser
 
