@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPhase2BDryRunReport } from '../scripts/phase-2b-dry-run';
+import { buildPhase2BDryRunReport, parseLocalSupabaseUrl } from '../scripts/phase-2b-dry-run';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
 const UPDATE = '22222222-2222-4222-8222-222222222222';
@@ -154,4 +154,13 @@ test('dry-run excludes other organisations from the legacy baseline but detects 
   assert.equal(report.baseline.collections.tenders, 0);
   assert.equal(report.validation.findingsByCode.scope_mismatch, undefined);
   assert.equal(report.validation.findingsByCode.imported_tender_scope_mismatch, 1);
+});
+
+test('local Supabase URL guard accepts IPv4, hostname and bracketed IPv6 loopback only', () => {
+  assert.equal(parseLocalSupabaseUrl('http://localhost:54321').hostname, 'localhost');
+  assert.equal(parseLocalSupabaseUrl('http://127.0.0.1:54321').hostname, '127.0.0.1');
+  assert.equal(parseLocalSupabaseUrl('http://[::1]:54321').hostname, '[::1]');
+  assert.throws(() => parseLocalSupabaseUrl('https://supabase.example.com'), /permanently restricted to localhost/);
+  assert.throws(() => parseLocalSupabaseUrl('http://localhost:54321@evil.example'), /permanently restricted to localhost/);
+  assert.throws(() => parseLocalSupabaseUrl('http://user:pass@localhost:54321'), /permanently restricted to localhost/);
 });
