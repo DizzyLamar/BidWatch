@@ -14,6 +14,7 @@ Migration `20261118065732_phase2_shared_procurement_intelligence.sql` introduces
 - `procurement_observation_versions` — append-only snapshots of changed source evidence.
 - `canonical_opportunities` — platform-level opportunity identity and current projection.
 - `canonical_opportunity_sources` — provenance links and match-review state.
+- `canonical_opportunity_events` — auditable source-link, merge and split review events.
 - `organisation_opportunities` — independent organisation-specific lifecycle and classification.
 
 The schema includes foreign keys, check constraints, uniqueness rules and query-oriented indexes. Opportunity owners are constrained to memberships in the same organisation through a composite foreign key.
