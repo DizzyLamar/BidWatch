@@ -165,12 +165,29 @@ function boundedLimit(value: number | undefined): number {
 }
 
 function validCursor(cursor: OpportunityCursor): boolean {
-  return UUID_PATTERN.test(cursor.id)
-    && typeof cursor.updatedAt === 'string'
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(cursor.updatedAt)
-    && Number.isFinite(Date.parse(cursor.updatedAt));
-}
+  if (!UUID_PATTERN.test(cursor.id) || typeof cursor.updatedAt !== 'string') return false;
 
+  const match = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.(\\d{1,6}))?(Z|([+-])(\\d{2}):(\\d{2}))$/.exec(cursor.updatedAt);
+  if (!match) return false;
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , zone, , zoneHourText, zoneMinuteText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const zoneHour = zoneHourText === undefined ? 0 : Number(zoneHourText);
+  const zoneMinute = zoneMinuteText === undefined ? 0 : Number(zoneMinuteText);
+
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+  return month >= 1 && month <= 12
+    && day >= 1 && day <= daysInMonth[month - 1]
+    && hour <= 23 && minute <= 59 && second <= 59
+    && (zone === 'Z' || (zoneHour <= 23 && zoneMinute <= 59));
+}
 /**
  * Read-only tenant repository for the Phase 2 canonical opportunity model.
  *
