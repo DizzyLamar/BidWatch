@@ -81,7 +81,7 @@ export function buildPhase2BDryRunReport(input: {
   // from a missing tender, but report only this organisation's tender baseline.
   const updates = rows.filter(row => row.table_name === 'opportunity_updates' && row.organisation_id === organisationId);
   const changes = rows.filter(row => row.table_name === 'opportunity_changes' && row.organisation_id === organisationId);
-  const runs = rows.filter(row => row.table_name === 'opportunity_source_runs' && row.scope_type === 'global' && row.organisation_id === null);
+  const runs = rows.filter(row => row.table_name === 'opportunity_source_runs');
   const allTenders = rows.filter(row => row.table_name === 'tenders');
   const tenders = allTenders.filter(row => row.scope_type === 'organisation' && row.organisation_id === organisationId);
   const updateById = new Map(updates.map(row => [row.id, row]));
