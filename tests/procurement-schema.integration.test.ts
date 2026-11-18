@@ -116,6 +116,13 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
     const browserRead = await anon.from('canonical_opportunities').select('id').eq('id', ids.canonical);
     assert.ok(browserRead.error, 'anonymous browser clients must not read platform-global procurement data');
 
+    const versionUpdate = await admin.from('procurement_observation_versions')
+      .update({ snapshot: { tampered: true } }).eq('id', randomUUID());
+    assert.ok(versionUpdate.error, 'source evidence versions must not be updateable by the application service');
+    const versionDelete = await admin.from('procurement_observation_versions')
+      .delete().eq('id', randomUUID());
+    assert.ok(versionDelete.error, 'source evidence versions must not be deleteable by the application service');
+
     const browserWrite = await anon.from('organisation_opportunities').insert({
       organisation_id: ids.orgA,
       canonical_opportunity_id: ids.canonical,
