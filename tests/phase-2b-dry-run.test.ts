@@ -209,3 +209,18 @@ test('dry-run report retains every quarantine finding above 1,000 records', () =
   assert.equal(report.validation.findings[0].code, 'invalid_notice_url');
   assert.equal(report.validation.findings[1004].code, 'invalid_notice_url');
 });
+
+test('dry-run matches imported tender UUIDs regardless of hexadecimal case', () => {
+  const report = buildPhase2BDryRunReport({
+    organisationId: ORG,
+    rows: [
+      row(TENDER, 'tenders', { title: 'Imported tender' }),
+      row(UPDATE, 'opportunity_updates', update({
+        state: 'imported', importedTenderId: TENDER.toUpperCase(),
+      })),
+    ],
+  });
+  assert.equal(report.validation.migratableUpdateCandidates, 1);
+  assert.equal(report.validation.quarantinedUpdateCandidates, 0);
+  assert.equal(report.validation.findingsByCode.imported_tender_missing, undefined);
+});
