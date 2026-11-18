@@ -145,6 +145,37 @@ create unique index canonical_opportunity_sources_active_observation_uidx
   on public.canonical_opportunity_sources (observation_id)
   where review_status in ('automatic', 'pending_review', 'confirmed');
 
+
+create table public.canonical_opportunity_events (
+  id uuid primary key default gen_random_uuid(),
+  event_type text not null,
+  canonical_opportunity_id uuid not null references public.canonical_opportunities(id) on delete restrict,
+  related_canonical_opportunity_id uuid references public.canonical_opportunities(id) on delete restrict,
+  observation_id uuid references public.procurement_source_observations(id) on delete restrict,
+  actor_user_id uuid references auth.users(id) on delete set null,
+  reason text,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  constraint canonical_opportunity_events_type_check check (
+    event_type in ('merge', 'split', 'source_linked', 'source_link_rejected', 'source_link_reassigned')
+  ),
+  constraint canonical_opportunity_events_related_check check (
+    event_type not in ('merge', 'split') or related_canonical_opportunity_id is not null
+  ),
+  constraint canonical_opportunity_events_observation_check check (
+    event_type not in ('source_linked', 'source_link_rejected', 'source_link_reassigned')
+    or observation_id is not null
+  ),
+  constraint canonical_opportunity_events_details_object check (jsonb_typeof(details) = 'object'),
+  constraint canonical_opportunity_events_reason_nonempty check (reason is null or length(btrim(reason)) > 0)
+);
+
+create index canonical_opportunity_events_canonical_created_idx
+  on public.canonical_opportunity_events (canonical_opportunity_id, created_at desc);
+
+create index canonical_opportunity_events_observation_created_idx
+  on public.canonical_opportunity_events (observation_id, created_at desc);
+
 create table public.organisation_opportunities (
   id uuid primary key default gen_random_uuid(),
   organisation_id uuid not null references public.organisations(id) on delete cascade,
@@ -220,6 +251,7 @@ alter table public.procurement_source_observations enable row level security;
 alter table public.procurement_observation_versions enable row level security;
 alter table public.canonical_opportunities enable row level security;
 alter table public.canonical_opportunity_sources enable row level security;
+alter table public.canonical_opportunity_events enable row level security;
 alter table public.organisation_opportunities enable row level security;
 
 revoke all on table
@@ -229,6 +261,7 @@ revoke all on table
   public.procurement_observation_versions,
   public.canonical_opportunities,
   public.canonical_opportunity_sources,
+  public.canonical_opportunity_events,
   public.organisation_opportunities
 from public, anon, authenticated;
 
@@ -238,6 +271,7 @@ grant select, insert, update, delete on table
   public.procurement_source_observations,
   public.canonical_opportunities,
   public.canonical_opportunity_sources,
+  public.canonical_opportunity_events,
   public.organisation_opportunities
 to service_role;
 
