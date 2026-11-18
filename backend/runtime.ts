@@ -1,5 +1,7 @@
 import express, { type Request, type Response } from 'express';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createClient } from '@supabase/supabase-js';
+import { assertOrganisationStoragePath, createScopedRecordRepository, type DatabaseScope } from './scoped-records';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
@@ -15,7 +17,8 @@ export type RouterContext = {
   body: unknown;
   params: Record<string, string>;
   query: Record<string, unknown>;
-  user?: { userId: string; email: string; name: string };
+  user?: { userId: string; email: string; name: string; emailVerified?: boolean };
+  organisation?: { id: string; slug: string; name: string; membershipId: string; roleId: string; roleKey: string; roleName: string; permissions: string[]; isPlatformAdmin: boolean };
   req: Request;
   res: Response;
 };
@@ -41,7 +44,7 @@ export function router(routes: RouteMap) {
     const split = definition.indexOf(' ');
     const method = definition.slice(0, split).toLowerCase();
     const routePath = definition.slice(split + 1);
-    const handler = async (req: Request, res: Response) => {
+    const handler = async (req: Request, res: Response) => databaseScopeStorage.run({ scope: null }, async () => {
       const ctx: RouterContext = {
         body: req.body,
         params: req.params as Record<string, string>,
@@ -62,7 +65,7 @@ export function router(routes: RouteMap) {
         console.error(err);
         if (!res.headersSent) res.status(500).json({ error: 'Internal server error.' });
       }
-    };
+    });
     (r as any)[method](routePath, handler);
   }
   return r;
@@ -78,59 +81,38 @@ export function requireAuth() {
     if (authError || !data.user) return error('Authentication required.', 401);
     const email = String(data.user.email || '').toLowerCase();
     const name = String(data.user.user_metadata?.full_name || data.user.user_metadata?.name || email.split('@')[0] || 'User');
-    ctx.user = { userId: data.user.id, email, name };
+    ctx.user = { userId: data.user.id, email, name, emailVerified: Boolean(data.user.email_confirmed_at || data.user.confirmed_at) };
   };
 }
 
-type RecordRow = { id: string; table_name: string; record: Record<string, unknown> };
+const databaseScopeStorage = new AsyncLocalStorage<{ scope: DatabaseScope | null }>();
 
-async function checked<T>(result: { data: T | null; error: any }) {
-  if (!supabase) throw new Error('Supabase is not configured.');
-  if (result.error) throw new Error(result.error.message);
-  return result.data as T;
+export function withDatabaseScope<T>(scope: DatabaseScope, callback: () => Promise<T>): Promise<T> {
+  return databaseScopeStorage.run({ scope }, callback);
 }
 
-export const db = {
-  async list<T>(table: string, options: { limit?: number } = {}) {
-    const result = await supabase!.from('app_records').select('id,table_name,record')
-      .eq('table_name', table).order('created_at', { ascending: false })
-      .limit(Math.min(options.limit ?? 500, 5000));
-    const rows = await checked<RecordRow[]>(result);
-    return { items: rows.map(row => ({ ...(row.record as T), id: row.id })) };
-  },
-  async get<T>(table: string, ids: string[]) {
-    if (!ids.length) return [];
-    const result = await supabase!.from('app_records').select('id,record').eq('table_name', table).in('id', ids);
-    const rows = await checked<Array<{ id: string; record: T }>>(result);
-    return rows.map(row => ({ ...(row.record as T), id: row.id }));
-  },
-  async add(table: string, records: Record<string, unknown>[]) {
-    if (!records.length) return [];
-    const rows = records.map(record => {
-      const { id: suppliedId, ...payload } = record as Record<string, unknown> & { id?: string };
-      return { ...(suppliedId ? { id: suppliedId } : {}), table_name: table, record: payload };
-    });
-    const result = await supabase!.from('app_records').insert(rows).select('id');
-    const inserted = await checked<Array<{ id: string }>>(result);
-    return inserted.map(row => row.id);
-  },
-  async update(table: string, updates: Array<{ id: string; record: object }>) {
-    for (const update of updates) {
-      const result = await supabase!.from('app_records')
-        .update({ record: update.record, updated_at: new Date().toISOString() })
-        .eq('table_name', table).eq('id', update.id);
-      await checked(result);
-    }
-  },
-  async delete(table: string, ids: string[]) {
-    if (!ids.length) return;
-    const result = await supabase!.from('app_records').delete().eq('table_name', table).in('id', ids);
-    await checked(result);
-  },
-};
+export function setDatabaseScope(scope: DatabaseScope) {
+  const store = databaseScopeStorage.getStore();
+  if (!store) throw new Error('Database scope can only be set during an API request.');
+  store.scope = scope;
+}
+
+export const db = createScopedRecordRepository(
+  supabase,
+  () => databaseScopeStorage.getStore()?.scope ?? null,
+);
+
+function assertStoragePath(path: string, allowLegacy = true) {
+  assertOrganisationStoragePath(
+    path,
+    databaseScopeStorage.getStore()?.scope ?? null,
+    allowLegacy,
+  );
+}
 
 export const storageService = {
   async put(path: string, content: string, contentType: string) {
+    assertStoragePath(path, false);
     if (!supabase) throw new Error('Supabase is not configured.');
     const result = await supabase!.storage.from(STORAGE_BUCKET).upload(path, Buffer.from(content, 'base64'), {
       contentType, upsert: false,
@@ -138,12 +120,14 @@ export const storageService = {
     return !result.error;
   },
   async getUrl(path: string) {
+    assertStoragePath(path);
     if (!supabase) throw new Error('Supabase is not configured.');
     const result = await supabase!.storage.from(STORAGE_BUCKET).createSignedUrl(path, 3600);
     if (result.error || !result.data?.signedUrl) throw new Error(result.error?.message || 'Could not create file URL.');
     return result.data.signedUrl;
   },
   async delete(paths: string[]) {
+    paths.forEach(path => assertStoragePath(path));
     if (!supabase) return paths.map(() => false);
     if (!paths.length) return [];
     const result = await supabase!.storage.from(STORAGE_BUCKET).remove(paths);
@@ -151,6 +135,7 @@ export const storageService = {
     return paths.map(() => true);
   },
   async listAll(prefix: string, maxFiles: number) {
+    assertStoragePath(prefix);
     if (!supabase) throw new Error('Supabase is not configured.');
     const root = prefix.replace(/^\/+|\/+$/g, '');
     const paths: string[] = [];

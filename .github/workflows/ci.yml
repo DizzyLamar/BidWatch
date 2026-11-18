@@ -21,10 +21,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Typecheck
         run: npm run typecheck
@@ -38,9 +38,57 @@ jobs:
       - name: Validate automation scripts
         run: node --check scripts/verify-repo.mjs
 
+  tenant-integration:
+    name: Local Supabase tenant isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Avoid collisions with a PostgreSQL listener on the runner's default 54322.
+      SUPABASE_DB_PORT: 55432
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser runtime
+        run: |
+          npm install --no-save --package-lock=false playwright
+          npx playwright install --with-deps chromium
+
+      - name: Start local Supabase (Auth, PostgREST, Database and Storage)
+        run: npx supabase start --exclude realtime,imgproxy,studio,edge-runtime,analytics,vector,supavisor
+
+      - name: Run real Auth and PostgREST integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(npx supabase status -o env)"
+          export SUPABASE_URL="$API_URL"
+          export SUPABASE_ANON_KEY="$ANON_KEY"
+          export SUPABASE_SECRET_KEY="$SERVICE_ROLE_KEY"
+          export VITE_SUPABASE_URL="$API_URL"
+          export VITE_SUPABASE_PUBLISHABLE_KEY="$ANON_KEY"
+          export BROWSER_TEST_PORT=4173
+          npm run build
+          npm run test:integration
+          npx tsx scripts/migrate-legacy-attachments.ts
+          npm run test:browser
+
+      - name: Stop local Supabase
+        if: always()
+        run: npx supabase stop
+
   deploy:
     name: Deploy to Render
-    needs: verify
+    needs: [verify, tenant-integration]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 18

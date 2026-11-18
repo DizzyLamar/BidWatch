@@ -32,6 +32,7 @@ import Opportunities from './Opportunities';
 import BidWorkspace from './BidWorkspace';
 
 type Role = 'Member' | 'Authorised' | 'Admin';
+type Organisation = { id: string; name: string; slug: string; roleName: string };
 type Status =
   | 'New'
   | 'Reviewing'
@@ -86,6 +87,7 @@ type User = {
   email: string;
   name: string;
   role: string;
+  isPlatformAdmin?: boolean;
   onboardingCompleted?: boolean;
   roleId?: string;
   permissions?: string[];
@@ -208,6 +210,11 @@ function routeFromHash() {
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<User | null>(null);
+  const [organisationChoices, setOrganisationChoices] = useState<Organisation[]>([]);
+  const [activeOrganisationId, setActiveOrganisationId] = useState('');
+  const [pendingOrganisationId, setPendingOrganisationId] = useState('');
+  const [organisationReady, setOrganisationReady] = useState(false);
+  const [organisationError, setOrganisationError] = useState('');
   const [view, setView] = useState(() => routeFromHash().view);
   const [adminTab, setAdminTab] = useState(() => routeFromHash().adminTab || 'users');
   const [tenders, setTenders] = useState<Tender[]>([]);
@@ -273,11 +280,11 @@ export default function App() {
         setKpis(kpiResponse.data.kpis || {});
         setCategories(cfg.data.categories);
         setCategoryRecords(cfg.data.categoryRecords || []);
-        if (me.data.user.permissions?.includes('users.view')) {
+        if (me.data.user.permissions?.includes('users.view') || me.data.user.permissions?.includes('users.manage')) {
           const adminUsers = await cachedGet('/api/admin/users', 30000);
           setUsers(adminUsers.data.users);
         }
-        if (me.data.user.permissions?.includes('roles.view')) {
+        if (me.data.user.permissions?.includes('roles.view') || me.data.user.permissions?.includes('roles.manage') || me.data.user.permissions?.includes('users.manage')) {
           const access = (await cachedGet('/api/admin/roles', 30000)).data;
           setRoles(access.roles);
           setPermissionMeta(access.permissions);
@@ -310,8 +317,43 @@ export default function App() {
     })();
   }, []);
   useEffect(() => {
-    if (user) refresh();
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await api.get('/api/organisations');
+        const choices: Organisation[] = response.data.organisations || [];
+        if (cancelled) return;
+        setOrganisationChoices(choices);
+        const saved = api.getOrganisationId();
+        const selected = choices.find(item => item.id === saved);
+        const initial = selected || (choices.length === 1 ? choices[0] : null);
+        if (initial) {
+          api.setOrganisationId(initial.id);
+          setActiveOrganisationId(initial.id);
+          setPendingOrganisationId(initial.id);
+          setOrganisationError('');
+          setOrganisationReady(true);
+        } else {
+          api.setOrganisationId(null);
+          setOrganisationReady(false);
+          setLoading(false);
+          setOrganisationError(choices.length
+            ? 'Choose the organisation you want to work in.'
+            : 'Your account does not have an active organisation membership. Ask an organisation administrator for access.');
+        }
+      } catch (e: any) {
+        if (cancelled) return;
+        setOrganisationReady(false);
+        setLoading(false);
+        setOrganisationError(e?.message || 'Could not load your organisation memberships.');
+      }
+    })();
+    return () => { cancelled = true; };
   }, [user]);
+  useEffect(() => {
+    if (user && organisationReady) refresh();
+  }, [user, organisationReady]);
   useEffect(() => {
     applySeo(view, Boolean(user), selected?.title);
   }, [view, user, selected?.title]);
@@ -362,8 +404,24 @@ export default function App() {
     clearApiCache();
     setUser(null);
     setProfile(null);
+    setOrganisationChoices([]);
+    setActiveOrganisationId('');
+    setPendingOrganisationId('');
+    setOrganisationReady(false);
+    setOrganisationError('');
     setShowOnboarding(false);
   }
+  function chooseOrganisation() {
+    const selected = organisationChoices.find(item => item.id === pendingOrganisationId);
+    if (!selected) return;
+    api.setOrganisationId(selected.id);
+    setActiveOrganisationId(selected.id);
+    setOrganisationReady(true);
+    setOrganisationError('');
+    setLoading(true);
+    clearApiCache();
+  }
+
   async function finishOnboarding() {
     try {
       await api.put('/api/me/onboarding', { completed: true });
@@ -440,6 +498,26 @@ export default function App() {
   }
 
   if (!user) return <AuthScreen onSignIn={signIn} notice={notice} />;
+  if (!organisationReady) return (
+    <main className="organisation-gate">
+      <div className="organisation-gate__inner">
+        <div className="brand-mark">B</div>
+        <p className="organisation-gate__eyebrow">BIDWATCH WORKSPACE</p>
+        <h1>Choose an organisation</h1>
+        <p className="organisation-gate__copy">{organisationError || 'Select the workspace you want to access.'}</p>
+        {organisationChoices.length > 0 ? (
+          <>
+            <label className="organisation-gate__label" htmlFor="active-organisation">Organisation</label>
+            <select id="active-organisation" className="organisation-gate__select" value={pendingOrganisationId} onChange={event => setPendingOrganisationId(event.target.value)}>
+              <option value="">Select an organisation</option>
+              {organisationChoices.map(item => <option key={item.id} value={item.id}>{item.name} · {item.roleName}</option>)}
+            </select>
+            <button className="organisation-gate__continue" disabled={!pendingOrganisationId} onClick={chooseOrganisation}>Continue</button>
+          </>
+        ) : <button className="organisation-gate__continue" onClick={signOut}>Sign out</button>}
+      </div>
+    </main>
+  );
   if (loading) return <div className="loading">Loading BidWatch…</div>;
   if (!profile) return <ErrorState message={loadError || 'We could not load your BidWatch profile.'} onRetry={refresh} />;
 
@@ -454,6 +532,14 @@ export default function App() {
           </div>
         </div>
         <div className="top-actions">
+          {organisationChoices.length > 1 && (
+            <label className="organisation-switcher">
+              <span className="sr-only">Active organisation</span>
+              <select value={activeOrganisationId} onChange={event => { api.setOrganisationId(event.target.value); window.location.reload(); }}>
+                {organisationChoices.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+          )}
           <div className="top-popover" ref={notificationRef}>
             <button
               className="icon-btn notification-trigger"
@@ -562,20 +648,18 @@ export default function App() {
                 }}
               />
             )}
-            {(profile.permissions?.includes('users.view') || profile.permissions?.includes('roles.view') || profile.permissions?.includes('categories.manage')) && (
+            {(profile.isPlatformAdmin || ['users.view', 'users.manage', 'roles.view', 'roles.manage', 'categories.manage', 'settings.manage'].some(permission => profile.permissions?.includes(permission))) && (
               <>
                 <div className="nav-label">Access & configuration</div>
-                {(profile.permissions?.includes('users.view') || profile.permissions?.includes('roles.view')) && (
-                  <NavItem
-                    icon={<Shield size={18} />}
-                    label="Administration"
-                    active={view === 'admin'}
-                    onClick={() => {
-                      navigate('admin/users');
-                      setMobileNav(false);
-                    }}
-                  />
-                )}
+                <NavItem
+                  icon={<Shield size={18} />}
+                  label="Administration"
+                  active={view === 'admin'}
+                  onClick={() => {
+                    navigate('admin/users');
+                    setMobileNav(false);
+                  }}
+                />
               </>
             )}
           </nav>
@@ -649,13 +733,13 @@ export default function App() {
               }}
             />
           )}
-          {view === 'profile' && <ProfileView profile={profile} onSaved={async () => { await refresh(); }} setNotice={showNotice} />} {view === 'settings' && <SettingsView setNotice={showNotice} />} {view === 'about' && <AboutView />} {view === 'admin' && (profile.permissions?.includes('users.view') || profile.permissions?.includes('roles.view')) && (
+          {view === 'profile' && <ProfileView profile={profile} onSaved={async () => { await refresh(); }} setNotice={showNotice} />} {view === 'settings' && <SettingsView setNotice={showNotice} />} {view === 'about' && <AboutView />} {view === 'admin' && (profile.isPlatformAdmin || ['users.view', 'users.manage', 'roles.view', 'roles.manage', 'categories.manage', 'settings.manage'].some(permission => profile.permissions?.includes(permission))) && (
             <Suspense fallback={<div className="panel" aria-live="polite">Loading administration…</div>}>
               <AdminPanel
                 users={users}
               roles={roles}
               permissions={permissionMeta}
-              profile={{ email: profile.email, role: profile.role, permissions: profile.permissions || [] }}
+              profile={{ email: profile.email, role: profile.role, permissions: profile.permissions || [], isPlatformAdmin: profile.isPlatformAdmin }}
               categories={categoryRecords}
               initialTab={adminTab as any}
               onTabChange={(tab) => navigate(`admin/${tab}`)}

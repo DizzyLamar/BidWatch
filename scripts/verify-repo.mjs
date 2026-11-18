@@ -13,9 +13,14 @@ for (const test of tests) {
 }
 
 const frontend = read('src/App.tsx');
+const platform = read('src/platform.ts');
 const backend = read('backend/index.ts');
 const css = read('src/index.css');
+const tenancy = read('backend/tenancy.ts');
+const runtime = read('backend/runtime.ts');
+const scopedRecords = read('backend/scoped-records.ts');
 const uiCss = read('src/ui-system.css');
+const attachmentMigration = read('scripts/migrate-legacy-attachments.ts');
 
 for (const [pattern, description] of [
   ['dangerouslySetInnerHTML', 'raw HTML rendering'],
@@ -39,6 +44,62 @@ for (const [pattern, description] of [
 ]) {
   if (!backend.includes(pattern)) failures.push(`Backend security/lifecycle regression: ${description} missing.`);
 }
+
+for (const [pattern, description] of [
+  ['GLOBAL_COLLECTIONS', 'explicit global collection allowlist'],
+  ['ORGANISATION_COLLECTIONS', 'explicit organisation collection allowlist'],
+  ["eq('scope_type', 'global')", 'global scope filtering'],
+  ["eq('scope_type', 'organisation')", 'organisation scope filtering'],
+  ["eq('organisation_id', organisationId)", 'organisation ID filtering'],
+  ["eq('user_id', ctx.user.userId)", 'membership identity verification'],
+  ["eq('status', 'active')", 'active membership verification'],
+  ["from('platform_admins')", 'database-backed platform administrator lookup'],
+  ['ctx.organisation =', 'verified organisation request context'],
+  ['new Set(ids).size !== ids.length', 'duplicate-ID rejection for scoped batch mutations'],
+  ['Scoped update rejected:', 'complete target-set validation before scoped updates'],
+  ['Scoped delete rejected:', 'complete target-set validation before scoped deletes'],
+]) {
+  if (!tenancy.includes(pattern)) failures.push(`Tenant isolation regression: ${description} missing.`);
+}
+if (!runtime.includes('organisation?:')) failures.push('Router context is missing the verified organisation context.');
+if (!runtime.includes('AsyncLocalStorage')) failures.push('Database access is not bound to an isolated request context.');
+if (!scopedRecords.includes('A verified database scope is required')) failures.push('Unscoped app-record access is not rejected.');
+if (!scopedRecords.includes("query.eq('scope_type', 'global').is('organisation_id', null)")) failures.push('Global records are not explicitly filtered.');
+if (!scopedRecords.includes('scope_type: GLOBAL_COLLECTIONS.has(table) ? \'global\' : \'organisation\'')) failures.push('New app records are not assigned an explicit scope.');
+
+const routeLines = backend.split('\n').filter(line => /^\s*['"](GET|POST|PUT|DELETE) /.test(line));
+for (const line of routeLines) {
+  if (line.includes('requireAuth()') && !line.includes('requireOrganisation()') && !line.includes("'GET /api/organisations'")) {
+    failures.push('An authenticated API route is missing organisation membership middleware.');
+  }
+  if (line.includes('/api/internal/') && !line.includes('validCronSecret(ctx)')) {
+    failures.push('An internal scheduled route is missing its cron-secret authorization.');
+  }
+}
+if (!backend.includes('listCurrentOrganisationMembers(ctx)')) failures.push('Organisation member administration is not membership-scoped.');
+if (!backend.includes('listCurrentOrganisationRoles(ctx)')) failures.push('Organisation role reads are not relational and tenant-scoped.');
+if (!backend.includes('activeOrganisationProfileIds(ctx)')) failures.push('Tender assignments are not restricted to active organisation members.');
+if (!backend.includes('listActiveOrganisations()')) failures.push('Scheduled jobs do not enumerate active organisations.');
+if (!backend.includes('withDatabaseScope')) failures.push('Scheduled jobs do not establish isolated organisation database scopes.');
+if (!backend.includes("withDatabaseScope({ kind: 'global' }")) failures.push('Scheduled source-run telemetry is not written in global scope.');
+if (!backend.includes("eq('status', 'active')")) failures.push('Scheduled reminders do not verify active organisation memberships.');
+if (!backend.includes('inviteUserByEmail')) failures.push('New organisation members are not invited through the trusted Auth Admin API.');
+if (!backend.includes("eq('status', 'invited')")) failures.push('Pending organisation invitations are not restricted to their invited Auth identity.');
+if (!backend.includes("status: 'removed'")) failures.push('Member removal is not represented as a workspace-scoped soft removal.');
+if (!backend.includes('last active organisation owner')) failures.push('The last active organisation owner is not protected from removal or demotion.');
+if (!backend.includes('member.user_id === ctx.user.userId')) failures.push('Members are not protected from suspending or removing their own access.');
+if (!backend.includes("from('organisation_roles')")) failures.push('Organisation role management is not backed by relational roles.');
+if (!backend.includes('Only a platform administrator can allocate sensitive permissions.')) failures.push('Sensitive role permissions are not protected by platform-admin authorization.');
+if (!backend.includes("This role is assigned to organisation members.")) failures.push('Assigned organisation roles are not protected from deletion.');
+if (!backend.includes("'GET /api/organisations': [requireAuth()")) failures.push('Authenticated organisation discovery is missing.');
+if (!attachmentMigration.includes("process.argv.includes('--apply')")) failures.push('Legacy attachment migration must default to dry-run.');
+if (!attachmentMigration.includes('legacyPath: item.oldPath')) failures.push('Legacy attachment originals are not retained in metadata.');
+if (attachmentMigration.includes('.remove(')) failures.push('Legacy attachment migration must not delete original storage objects.');
+if (!backend.includes('a.legacyPath')) failures.push('Legacy attachment originals are not protected from orphan cleanup.');
+if (!platform.includes("'X-Organisation-Id'")) failures.push('The API client does not send the explicitly selected organisation context.');
+if (!platform.includes('setOrganisationId(id: string | null)')) failures.push('The API client cannot persist an explicit organisation selection.');
+if (!backend.includes('organisations/\u0024{ctx.organisation!.id}/tenders/')) failures.push('New attachment uploads are not organisation-prefixed.');
+if (!backend.includes("eq('status', 'active')")) failures.push('Reminder delivery does not filter active organisation memberships.');
 
 if (!uiCss.includes('.modal-backdrop')) failures.push('Confirmation modal styling is missing from the UI system.');
 if (!css.includes('.form-error')) failures.push('Inline production error styling is missing.');
