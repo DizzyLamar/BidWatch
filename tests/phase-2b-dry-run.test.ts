@@ -241,7 +241,7 @@ test('legacy inventory keyset pagination does not skip rows when earlier UUIDs a
       select: () => ({
         order: () => {
           let cursor: string | null = null;
-          const builder = {
+          const builder: any = {
             gt: (_column: string, value: string) => { cursor = value; return builder; },
             limit: async (pageSize: number) => {
               requests += 1;
