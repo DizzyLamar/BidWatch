@@ -19,6 +19,8 @@ Migration `20261118065732_phase2_shared_procurement_intelligence.sql` introduces
 
 The schema includes foreign keys, check constraints, uniqueness rules and query-oriented indexes. Opportunity owners are constrained to memberships in the same organisation through a composite foreign key.
 
+The read-only backend repository in `backend/procurement-repository.ts` derives the tenant predicate from the verified AsyncLocalStorage request scope. It exposes list/detail reads for the active organisation only, uses a bounded page size, and returns curated source provenance without raw connector payloads. It intentionally provides no platform-global reads or mutation methods in 2A.
+
 ## Security model
 
 - RLS is enabled on every new table.
