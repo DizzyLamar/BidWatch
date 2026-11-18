@@ -215,7 +215,12 @@ export function createRequireOrganisationMiddleware(
 }
 
 export function requireOrganisation() {
-  return createRequireOrganisationMiddleware(client(), setDatabaseScope);
+  // Resolve Supabase only when a request reaches this middleware. Route registration
+  // must remain safe when the service is booting without deployment configuration.
+  return async (ctx: RouterContext) => {
+    if (!supabaseAdmin) return error('BidWatch server is missing its Supabase configuration.', 503);
+    return createRequireOrganisationMiddleware(supabaseAdmin, setDatabaseScope)(ctx);
+  };
 }
 
 export function requireLegacyOrganisation() {
