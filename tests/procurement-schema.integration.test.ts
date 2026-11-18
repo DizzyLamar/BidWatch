@@ -125,6 +125,36 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
     ids.pursuitA = pursuits.data.find(row => row.organisation_id === ids.orgA)!.id;
     ids.pursuitB = pursuits.data.find(row => row.organisation_id === ids.orgB)!.id;
 
+    const runtime = await import('../backend/runtime');
+    const procurement = await import('../backend/procurement-repository');
+    const organisationAReads = await runtime.withDatabaseScope(
+      { kind: 'organisation', organisationId: ids.orgA },
+      () => procurement.procurementReadRepository.listOrganisationOpportunities(),
+    );
+    assert.equal(organisationAReads.length, 1);
+    assert.equal(organisationAReads[0].id, ids.pursuitA);
+    assert.equal(organisationAReads[0].state, 'pursuing');
+    assert.equal(organisationAReads[0].canonical_opportunities.canonical_key, 'canonical-' + suffix);
+    assert.equal(organisationAReads[0].canonical_opportunities.canonical_opportunity_sources.length, 1);
+    assert.equal(
+      organisationAReads[0].canonical_opportunities.canonical_opportunity_sources[0].procurement_source_observations.source_key,
+      'notice-' + suffix,
+    );
+
+    const organisationBReads = await runtime.withDatabaseScope(
+      { kind: 'organisation', organisationId: ids.orgB },
+      () => procurement.procurementReadRepository.listOrganisationOpportunities(),
+    );
+    assert.equal(organisationBReads.length, 1);
+    assert.equal(organisationBReads[0].id, ids.pursuitB);
+    assert.equal(organisationBReads[0].state, 'dismissed');
+
+    const crossTenantKnownId = await runtime.withDatabaseScope(
+      { kind: 'organisation', organisationId: ids.orgA },
+      () => procurement.procurementReadRepository.getOrganisationOpportunity(ids.pursuitB),
+    );
+    assert.equal(crossTenantKnownId, null, 'known-ID reads must not reveal another organisation\'s pursuit');
+
     const secondCanonical = await admin.from('canonical_opportunities').insert({
       canonical_key: 'canonical-owner-check-' + suffix,
       title: 'Owner membership constraint check',
