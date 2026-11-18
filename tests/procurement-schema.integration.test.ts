@@ -81,6 +81,17 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
     assert.ok(linkResult.data);
     ids.link = linkResult.data.id;
 
+    const eventResult = await admin.from('canonical_opportunity_events').insert({
+      event_type: 'source_linked',
+      canonical_opportunity_id: ids.canonical,
+      observation_id: ids.observation,
+      reason: 'Integration fixture provenance link',
+      details: { fixture: true },
+    }).select('id').single();
+    assert.ifError(eventResult.error);
+    assert.ok(eventResult.data);
+    ids.event = eventResult.data.id;
+
     const orgA = await admin.from('organisations').insert({
       name: 'Phase 2A Test A ' + suffix,
       slug: 'phase-2a-test-a-' + suffix.slice(0, 8),
@@ -161,6 +172,7 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
     if (ids.orgA || ids.orgB) {
       await admin.from('organisations').delete().in('id', [ids.orgA, ids.orgB].filter(Boolean));
     }
+    if (ids.event) await admin.from('canonical_opportunity_events').delete().eq('id', ids.event);
     if (ids.link) await admin.from('canonical_opportunity_sources').delete().eq('id', ids.link);
     if (ids.observation) await admin.from('procurement_source_observations').delete().eq('id', ids.observation);
     if (ids.canonical2) await admin.from('canonical_opportunities').delete().eq('id', ids.canonical2);
