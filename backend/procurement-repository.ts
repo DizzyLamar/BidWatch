@@ -71,9 +71,20 @@ export type ProcurementOpportunityRow = {
   };
 };
 
+export type OpportunityCursor = {
+  updatedAt: string;
+  id: string;
+};
+
 export type ListOrganisationOpportunitiesOptions = {
   state?: OpportunityState;
   limit?: number;
+  cursor?: OpportunityCursor;
+};
+
+export type OrganisationOpportunityPage = {
+  items: ProcurementOpportunityRow[];
+  nextCursor: OpportunityCursor | null;
 };
 
 const OPPORTUNITY_SELECT = `
@@ -138,6 +149,8 @@ const OPPORTUNITY_SELECT = `
   )
 `;
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function activeOrganisationId(getScope: () => DatabaseScope | null): string {
   const scope = getScope();
   if (!scope || scope.kind !== 'organisation') {
@@ -149,6 +162,12 @@ function activeOrganisationId(getScope: () => DatabaseScope | null): string {
 function boundedLimit(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return 50;
   return Math.min(100, Math.max(1, Math.trunc(value)));
+}
+
+function validCursor(cursor: OpportunityCursor): boolean {
+  return UUID_PATTERN.test(cursor.id)
+    && typeof cursor.updatedAt === 'string'
+    && Number.isFinite(Date.parse(cursor.updatedAt));
 }
 
 /**
@@ -168,32 +187,57 @@ export function createProcurementReadRepository(
   }
 
   return {
-    async listOrganisationOpportunities(
+    async listOrganisationOpportunitiesPage(
       options: ListOrganisationOpportunitiesOptions = {},
-    ): Promise<ProcurementOpportunityRow[]> {
+    ): Promise<OrganisationOpportunityPage> {
       const organisationId = activeOrganisationId(getScope);
       const limit = boundedLimit(options.limit);
+      if (options.cursor && !validCursor(options.cursor)) {
+        throw new Error('Invalid procurement opportunity cursor.');
+      }
+
       let query = database()
         .from('organisation_opportunities')
         .select(OPPORTUNITY_SELECT)
         .eq('organisation_id', organisationId);
 
       if (options.state) query = query.eq('state', options.state);
+      if (options.cursor) {
+        const timestamp = new Date(options.cursor.updatedAt).toISOString();
+        query = query.or(
+          `updated_at.lt.${timestamp},and(updated_at.eq.${timestamp},id.lt.${options.cursor.id})`,
+        );
+      }
 
       const { data, error } = await query
         .order('updated_at', { ascending: false })
         .order('id', { ascending: false })
-        .limit(limit);
+        .limit(limit + 1);
 
       if (error) throw new Error(error.message);
-      return (data || []) as ProcurementOpportunityRow[];
+      const rows = (data || []) as ProcurementOpportunityRow[];
+      const hasMore = rows.length > limit;
+      const items = rows.slice(0, limit);
+      const lastItem = items[items.length - 1];
+
+      return {
+        items,
+        nextCursor: hasMore && lastItem
+          ? { updatedAt: lastItem.updated_at, id: lastItem.id }
+          : null,
+      };
+    },
+
+    async listOrganisationOpportunities(
+      options: ListOrganisationOpportunitiesOptions = {},
+    ): Promise<ProcurementOpportunityRow[]> {
+      const { items } = await this.listOrganisationOpportunitiesPage(options);
+      return items;
     },
 
     async getOrganisationOpportunity(id: string): Promise<ProcurementOpportunityRow | null> {
       const organisationId = activeOrganisationId(getScope);
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
-        return null;
-      }
+      if (!UUID_PATTERN.test(id)) return null;
 
       const { data, error } = await database()
         .from('organisation_opportunities')
