@@ -220,3 +220,7 @@ The command refuses to start unless the explicit dry-run flag is set and the con
 By default, the JSON report is written to `artifacts/phase-2b-dry-run.json`. Override the destination with `PHASE2B_REPORT_PATH`. The report queries `opportunity_updates` and `opportunity_changes` for the resolved legacy organisation only, while source runs remain global. Tender baseline counts are organisation-scoped; only tender IDs referenced by imported updates are additionally looked up across organisations, so cross-tenant imported references are quarantined rather than mistaken for missing tenders. The report contains record IDs, counts and validation messages, but not raw scraped payloads.
 
 A freshly reset local database may contain no legacy discovery records; in that case the inventory will correctly report zero. The local Supabase integration test inserts temporary synthetic records, executes the same inventory function, verifies the expected quarantine and migration-candidate counts, checks that the records are unchanged, and removes the fixtures. It never uses production data.
+
+
+### Dry-run report completeness
+The read-only inventory report retains every row-level finding, not just a capped sample. Invalid imported tender UUIDs are quarantined before any UUID-column lookup, and malformed JSON records are handled before imported-reference extraction. These behaviours are covered by unit tests, including a report with more than 1,000 findings.
