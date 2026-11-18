@@ -217,6 +217,6 @@ npm run phase2b:dry-run
 
 The command refuses to start unless the explicit dry-run flag is set and the configured hostname is `localhost`, `127.0.0.1`, or `::1`. It uses dedicated local-only environment variable names and does not fall back to the application's normal Supabase variables.
 
-By default, the JSON report is written to `artifacts/phase-2b-dry-run.json`. Override the destination with `PHASE2B_REPORT_PATH`. The report contains record IDs, counts and validation messages, but not raw scraped payloads.
+By default, the JSON report is written to `artifacts/phase-2b-dry-run.json`. Override the destination with `PHASE2B_REPORT_PATH`. The report inventories `opportunity_updates` and `opportunity_changes` for the resolved legacy organisation only, while source runs remain global. Tender baseline counts are organisation-scoped; the lookup also checks referenced tender IDs across organisations so cross-tenant imported references are quarantined rather than mistaken for missing tenders. The report contains record IDs, counts and validation messages, but not raw scraped payloads.
 
 A freshly reset local database may contain no legacy discovery records; in that case the inventory will correctly report zero. The local Supabase integration test inserts temporary synthetic records, executes the same inventory function, verifies the expected quarantine and migration-candidate counts, checks that the records are unchanged, and removes the fixtures. It never uses production data.
