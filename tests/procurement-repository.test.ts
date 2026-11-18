@@ -105,6 +105,24 @@ test('invalid pagination cursors are rejected before querying Supabase', async (
     /Invalid procurement opportunity cursor/,
   );
   assert.equal(fake.calls.length, 0);
+
+  for (const updatedAt of [
+    '2026-02-30T12:00:00Z',
+    '2025-02-29T12:00:00Z',
+    '2026-11-18T24:00:00Z',
+    '2026-11-18T12:60:00Z',
+    '2026-11-18T12:00:60Z',
+    '2026-11-18T12:00:00+02:60',
+  ]) {
+    await assert.rejects(
+      repository.listOrganisationOpportunitiesPage({
+        cursor: { updatedAt, id: OPPORTUNITY_ID },
+      }),
+      /Invalid procurement opportunity cursor/,
+      updatedAt,
+    );
+  }
+  assert.equal(fake.calls.length, 0);
 });
 
 test('known-ID reads include both the active organisation and record ID predicates', async () => {
