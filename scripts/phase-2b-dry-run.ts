@@ -244,15 +244,23 @@ export function buildPhase2BDryRunReport(input: {
   };
 }
 
+export function parseLocalSupabaseUrl(urlValue: string): URL {
+  const url = new URL(urlValue);
+  // WHATWG URL serializes IPv6 hostnames with brackets (for example, "[::1]").
+  // Strip those brackets before comparing against the literal loopback allowlist.
+  const hostname = url.hostname.replace(/^\\[|\\]$/g, '').toLowerCase();
+  if (!['localhost', '127.0.0.1', '::1'].includes(hostname) || url.username || url.password) {
+    throw new Error('Refusing non-local Supabase host. This tool is permanently restricted to localhost.');
+  }
+  return url;
+}
+
 function assertLocalDryRunConfiguration() {
   if (process.env.PHASE2B_DRY_RUN !== '1') throw new Error('Refusing to run: set PHASE2B_DRY_RUN=1 explicitly.');
   const urlValue = process.env.LOCAL_SUPABASE_URL || '';
   const key = process.env.LOCAL_SUPABASE_SERVICE_ROLE_KEY || '';
   if (!urlValue || !key) throw new Error('Set LOCAL_SUPABASE_URL and LOCAL_SUPABASE_SERVICE_ROLE_KEY for the local Supabase stack.');
-  const url = new URL(urlValue);
-  if (!['localhost', '127.0.0.1', '::1'].includes(url.hostname)) {
-    throw new Error('Refusing non-local Supabase host. This tool is permanently restricted to localhost.');
-  }
+  const url = parseLocalSupabaseUrl(urlValue);
   return { url: url.toString(), key };
 }
 
