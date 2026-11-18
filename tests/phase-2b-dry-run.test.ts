@@ -101,3 +101,28 @@ test('dry-run reports orphaned changes without claiming reconstructable snapshot
   assert.equal(report.history.reconstructableFullSnapshots, 0);
   assert.equal(report.validation.findingsByCode.orphan_change, 1);
 });
+
+test('dry-run quarantines malformed document links and credential-bearing URLs', () => {
+  const report = buildPhase2BDryRunReport({
+    organisationId: ORG,
+    rows: [row(UPDATE, 'opportunity_updates', update({
+      url: 'https://user:secret@example.org/tender/1',
+      details: { documents: [{ title: 'Tender document', url: 'javascript:alert(1)' }] },
+    }))],
+  });
+  assert.equal(report.validation.quarantinedUpdateCandidates, 1);
+  assert.equal(report.validation.findingsByCode.invalid_notice_url, 1);
+  assert.equal(report.validation.findingsByCode.invalid_documents, 1);
+});
+
+test('dry-run quarantines imported references to structurally invalid same-organisation tenders', () => {
+  const report = buildPhase2BDryRunReport({
+    organisationId: ORG,
+    rows: [
+      row(TENDER, 'tenders', { description: 'Missing title' }),
+      row(UPDATE, 'opportunity_updates', update({ state: 'imported', importedTenderId: TENDER })),
+    ],
+  });
+  assert.equal(report.validation.quarantinedUpdateCandidates, 1);
+  assert.equal(report.validation.findingsByCode.imported_tender_invalid, 1);
+});
