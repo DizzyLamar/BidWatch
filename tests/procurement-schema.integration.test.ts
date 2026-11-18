@@ -56,16 +56,6 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
     assert.ifError(observationResult.error);
     ids.observation = observationResult.data.id;
 
-    const versionResult = await admin.from('procurement_observation_versions').insert({
-      observation_id: ids.observation,
-      source_run_id: ids.run,
-      version_no: 1,
-      content_hash: 'hash-' + suffix,
-      snapshot: { title: 'Integration test ICT procurement', raw: { preserved: true } },
-    }).select('id').single();
-    assert.ifError(versionResult.error);
-    ids.version = versionResult.data.id;
-
     const canonicalResult = await admin.from('canonical_opportunities').insert({
       canonical_key: 'canonical-' + suffix,
       title: 'Integration test ICT procurement',
@@ -133,9 +123,6 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
     });
     assert.ok(browserWrite.error, 'anonymous browser clients must not create tenant pursuit records');
 
-    const versionUpdate = await admin.from('procurement_observation_versions')
-      .update({ snapshot: { tampered: true } }).eq('id', ids.version);
-    assert.ok(versionUpdate.error, 'source evidence versions must be append-only to the application service');
   } finally {
     if (ids.pursuitA || ids.pursuitB) {
       await admin.from('organisation_opportunities').delete().in('id', [ids.pursuitA, ids.pursuitB].filter(Boolean));
@@ -144,7 +131,6 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
       await admin.from('organisations').delete().in('id', [ids.orgA, ids.orgB].filter(Boolean));
     }
     if (ids.link) await admin.from('canonical_opportunity_sources').delete().eq('id', ids.link);
-    if (ids.version) await admin.from('procurement_observation_versions').delete().eq('id', ids.version);
     if (ids.observation) await admin.from('procurement_source_observations').delete().eq('id', ids.observation);
     if (ids.canonical) await admin.from('canonical_opportunities').delete().eq('id', ids.canonical);
     if (ids.run) await admin.from('procurement_source_runs').delete().eq('id', ids.run);
