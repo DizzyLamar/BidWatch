@@ -190,7 +190,7 @@ export function createProcurementReadRepository(
     },
 
     async getOrganisationOpportunity(id: string): Promise<ProcurementOpportunityRow | null> {
-      const organisationId = activeOrganisationId(getScope());
+      const organisationId = activeOrganisationId(getScope);
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
         return null;
       }
