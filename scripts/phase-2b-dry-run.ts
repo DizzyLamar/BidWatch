@@ -45,8 +45,16 @@ function validHttpUrl(value: unknown): boolean {
   if (typeof value !== 'string' || !value.trim()) return false;
   try {
     const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
+    return (url.protocol === 'http:' || url.protocol === 'https:') &&
+      Boolean(url.hostname) && !url.username && !url.password;
   } catch { return false; }
+}
+function validDocumentLinks(value: unknown): boolean {
+  return Array.isArray(value) && value.every(document =>
+    isObject(document) &&
+    typeof document.title === 'string' && Boolean(document.title.trim()) &&
+    validHttpUrl(document.url)
+  );
 }
 function addFinding(findings: Finding[], row: LegacyRow, code: string, message: string) {
   findings.push({ recordId: row.id, collection: row.table_name, code, message });
@@ -97,11 +105,15 @@ export function buildPhase2BDryRunReport(input: {
     if (item.relevanceScore != null && (!Number.isFinite(Number(item.relevanceScore)) || Number(item.relevanceScore) < 0 || Number(item.relevanceScore) > 100)) {
       addFinding(findings, row, 'invalid_relevance_score', 'relevanceScore must be between 0 and 100.');
     }
-    if (item.categories != null && !Array.isArray(item.categories)) addFinding(findings, row, 'invalid_categories', 'categories must be an array when present.');
-    if (item.matchedTerms != null && !Array.isArray(item.matchedTerms)) addFinding(findings, row, 'invalid_matched_terms', 'matchedTerms must be an array when present.');
+    if (item.categories != null && (!Array.isArray(item.categories) || !item.categories.every(value => typeof value === 'string'))) {
+      addFinding(findings, row, 'invalid_categories', 'categories must be an array of strings when present.');
+    }
+    if (item.matchedTerms != null && (!Array.isArray(item.matchedTerms) || !item.matchedTerms.every(value => typeof value === 'string'))) {
+      addFinding(findings, row, 'invalid_matched_terms', 'matchedTerms must be an array of strings when present.');
+    }
     if (item.details != null && !isObject(item.details)) addFinding(findings, row, 'invalid_details', 'details must be an object when present.');
-    if (isObject(item.details) && item.details.documents != null && !Array.isArray(item.details.documents)) {
-      addFinding(findings, row, 'invalid_documents', 'details.documents must be an array when present.');
+    if (isObject(item.details) && item.details.documents != null && !validDocumentLinks(item.details.documents)) {
+      addFinding(findings, row, 'invalid_documents', 'details.documents must contain objects with non-empty titles and credential-free HTTP(S) URLs.');
     }
     if (item.state === 'dismissed' && !validTimestamp(item.dismissedAt)) {
       addFinding(findings, row, 'dismissal_timestamp_unresolved', 'No valid legacy dismissedAt timestamp exists; do not invent dismissed_at.');
@@ -112,6 +124,8 @@ export function buildPhase2BDryRunReport(input: {
       if (!tender) addFinding(findings, row, 'imported_tender_missing', 'Imported state does not resolve to an existing legacy tender record.');
       else if (tender.scope_type !== 'organisation' || tender.organisation_id !== organisationId) {
         addFinding(findings, row, 'imported_tender_scope_mismatch', 'Referenced tender is not in the same legacy organisation.');
+      } else if (!isObject(tender.record) || typeof tender.record.title !== 'string' || !tender.record.title.trim()) {
+        addFinding(findings, row, 'imported_tender_invalid', 'Referenced tender exists in the same organisation but has no valid non-empty title.');
       }
     }
   }
@@ -163,7 +177,7 @@ export function buildPhase2BDryRunReport(input: {
     'invalid_first_seen', 'invalid_last_seen', 'seen_order_invalid', 'unknown_update_state',
     'invalid_fit_level', 'invalid_relevance_score', 'invalid_categories', 'invalid_matched_terms',
     'invalid_details', 'invalid_documents', 'dismissal_timestamp_unresolved', 'imported_tender_missing',
-    'imported_tender_scope_mismatch',
+    'imported_tender_scope_mismatch', 'imported_tender_invalid',
   ]);
   const blockedUpdateIds = new Set(findings.filter(f => f.collection === 'opportunity_updates' && blockingCodes.has(f.code)).map(f => f.recordId));
   const runBlocking = new Set(['run_scope_mismatch', 'unknown_run_source', 'unknown_run_status', 'unknown_scan_type',
