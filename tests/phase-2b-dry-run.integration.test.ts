@@ -2,15 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
-import { collectPhase2BDryRunReport } from '../scripts/phase-2b-dry-run';
+import { collectPhase2BDryRunReport, parseLocalSupabaseUrl } from '../scripts/phase-2b-dry-run';
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const serviceKey = process.env.SUPABASE_SECRET_KEY || '';
 
 test('Phase 2B dry-run inventories synthetic legacy records without changing them', async () => {
   assert.ok(supabaseUrl && serviceKey, 'Export local Supabase URL and service-role key before running this integration test.');
-  const host = new URL(supabaseUrl).hostname;
-  assert.ok(['localhost', '127.0.0.1', '::1'].includes(host), 'Refusing to write integration fixtures to a non-local Supabase host.');
+  assert.doesNotThrow(
+    () => parseLocalSupabaseUrl(supabaseUrl),
+    'Refusing to write integration fixtures to a non-local Supabase host.',
+  );
 
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
