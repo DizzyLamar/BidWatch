@@ -91,6 +91,10 @@ export function withDatabaseScope<T>(scope: DatabaseScope, callback: () => Promi
   return databaseScopeStorage.run({ scope }, callback);
 }
 
+export function getDatabaseScope(): DatabaseScope | null {
+  return databaseScopeStorage.getStore()?.scope ?? null;
+}
+
 export function setDatabaseScope(scope: DatabaseScope) {
   const store = databaseScopeStorage.getStore();
   if (!store) throw new Error('Database scope can only be set during an API request.');
