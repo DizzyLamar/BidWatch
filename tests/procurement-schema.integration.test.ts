@@ -29,6 +29,7 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
       adapter_key: 'test-adapter',
     }).select('id').single();
     assert.ifError(sourceResult.error);
+    assert.ok(sourceResult.data);
     ids.source = sourceResult.data.id;
 
     const runResult = await admin.from('procurement_source_runs').insert({
@@ -40,6 +41,7 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
       relevant_count: 1,
     }).select('id').single();
     assert.ifError(runResult.error);
+    assert.ok(runResult.data);
     ids.run = runResult.data.id;
 
     const observationResult = await admin.from('procurement_source_observations').insert({
@@ -54,6 +56,7 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
       raw_payload: { source: 'test', preserved: true },
     }).select('id').single();
     assert.ifError(observationResult.error);
+    assert.ok(observationResult.data);
     ids.observation = observationResult.data.id;
 
     const canonicalResult = await admin.from('canonical_opportunities').insert({
@@ -64,6 +67,7 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
       lifecycle_status: 'open',
     }).select('id').single();
     assert.ifError(canonicalResult.error);
+    assert.ok(canonicalResult.data);
     ids.canonical = canonicalResult.data.id;
 
     const linkResult = await admin.from('canonical_opportunity_sources').insert({
@@ -74,6 +78,7 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
       review_status: 'automatic',
     }).select('id').single();
     assert.ifError(linkResult.error);
+    assert.ok(linkResult.data);
     ids.link = linkResult.data.id;
 
     const orgA = await admin.from('organisations').insert({
@@ -82,6 +87,7 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
       status: 'active',
     }).select('id').single();
     assert.ifError(orgA.error);
+    assert.ok(orgA.data);
     ids.orgA = orgA.data.id;
 
     const orgB = await admin.from('organisations').insert({
@@ -90,6 +96,7 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
       status: 'active',
     }).select('id').single();
     assert.ifError(orgB.error);
+    assert.ok(orgB.data);
     ids.orgB = orgB.data.id;
 
     const pursuits = await admin.from('organisation_opportunities').insert([
@@ -97,6 +104,7 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
       { organisation_id: ids.orgB, canonical_opportunity_id: ids.canonical, state: 'dismissed', dismissed_at: new Date().toISOString(), fit_level: 'peripheral', relevance_score: 12 },
     ]).select('id,organisation_id,state');
     assert.ifError(pursuits.error);
+    assert.ok(pursuits.data);
     assert.equal(pursuits.data.length, 2);
     assert.deepEqual(
       pursuits.data.map(row => row.state).sort(),
@@ -105,6 +113,22 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
     );
     ids.pursuitA = pursuits.data.find(row => row.organisation_id === ids.orgA)!.id;
     ids.pursuitB = pursuits.data.find(row => row.organisation_id === ids.orgB)!.id;
+
+    const secondCanonical = await admin.from('canonical_opportunities').insert({
+      canonical_key: 'canonical-owner-check-' + suffix,
+      title: 'Owner membership constraint check',
+      lifecycle_status: 'open',
+    }).select('id').single();
+    assert.ifError(secondCanonical.error);
+    assert.ok(secondCanonical.data);
+    ids.canonical2 = secondCanonical.data.id;
+    const invalidOwner = await admin.from('organisation_opportunities').insert({
+      organisation_id: ids.orgA,
+      canonical_opportunity_id: ids.canonical2,
+      state: 'watching',
+      owner_user_id: randomUUID(),
+    });
+    assert.ok(invalidOwner.error, 'a pursuit owner must be a member of the same organisation');
 
     const duplicate = await admin.from('organisation_opportunities').insert({
       organisation_id: ids.orgA,
@@ -139,6 +163,7 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
     }
     if (ids.link) await admin.from('canonical_opportunity_sources').delete().eq('id', ids.link);
     if (ids.observation) await admin.from('procurement_source_observations').delete().eq('id', ids.observation);
+    if (ids.canonical2) await admin.from('canonical_opportunities').delete().eq('id', ids.canonical2);
     if (ids.canonical) await admin.from('canonical_opportunities').delete().eq('id', ids.canonical);
     if (ids.run) await admin.from('procurement_source_runs').delete().eq('id', ids.run);
     if (ids.source) await admin.from('procurement_sources').delete().eq('id', ids.source);
