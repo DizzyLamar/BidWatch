@@ -76,12 +76,16 @@ export function buildPhase2BDryRunReport(input: {
   const { organisationId, rows } = input;
   const findings: Finding[] = [];
   const sourceKeys = new Set(LEGACY_SOURCES.map(source => source.id));
-  const updates = rows.filter(row => row.table_name === 'opportunity_updates');
-  const changes = rows.filter(row => row.table_name === 'opportunity_changes');
-  const runs = rows.filter(row => row.table_name === 'opportunity_source_runs');
-  const tenders = rows.filter(row => row.table_name === 'tenders');
+  // Only inventory organisation-owned updates/history for the resolved legacy workspace.
+  // Keep the tender lookup cross-tenant so a foreign importedTenderId is distinguishable
+  // from a missing tender, but report only this organisation's tender baseline.
+  const updates = rows.filter(row => row.table_name === 'opportunity_updates' && row.organisation_id === organisationId);
+  const changes = rows.filter(row => row.table_name === 'opportunity_changes' && row.organisation_id === organisationId);
+  const runs = rows.filter(row => row.table_name === 'opportunity_source_runs' && row.scope_type === 'global' && row.organisation_id === null);
+  const allTenders = rows.filter(row => row.table_name === 'tenders');
+  const tenders = allTenders.filter(row => row.scope_type === 'organisation' && row.organisation_id === organisationId);
   const updateById = new Map(updates.map(row => [row.id, row]));
-  const tenderById = new Map(tenders.map(row => [row.id, row]));
+  const tenderById = new Map(allTenders.map(row => [row.id, row]));
 
   for (const row of updates) {
     const item = row.record;
