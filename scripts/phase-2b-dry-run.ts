@@ -278,9 +278,29 @@ export async function collectPhase2BDryRunReport(client: any) {
     throw new Error('Expected exactly one legacy-bidwatch-workspace organisation; found ' + (orgResult.data?.length ?? 0) + '.');
   }
   const organisationId = String(orgResult.data[0].id);
-  const rows = await readAllRows(client, builder => builder.in('table_name', [
-    'opportunity_updates', 'opportunity_changes', 'opportunity_source_runs', 'tenders',
-  ]));
+  const organisationRows = await readAllRows(client, builder => builder
+    .in('table_name', ['opportunity_updates', 'opportunity_changes'])
+    .eq('organisation_id', organisationId));
+  const sourceRunRows = await readAllRows(client, builder =>
+    builder.eq('table_name', 'opportunity_source_runs'));
+  const updates = organisationRows.filter(row => row.table_name === 'opportunity_updates');
+  const importedTenderIds = [...new Set(updates
+    .filter(row => row.record.state === 'imported' && typeof row.record.importedTenderId === 'string')
+    .map(row => String(row.record.importedTenderId)))];
+  const organisationTenderRows = await readAllRows(client, builder => builder
+    .eq('table_name', 'tenders')
+    .eq('organisation_id', organisationId));
+  const referencedTenderRows = importedTenderIds.length
+    ? await readAllRows(client, builder => builder
+      .eq('table_name', 'tenders')
+      .in('id', importedTenderIds))
+    : [];
+  const tenderById = new Map([...organisationTenderRows, ...referencedTenderRows].map(row => [row.id, row]));
+  const rows = [
+    ...organisationRows,
+    ...sourceRunRows,
+    ...tenderById.values(),
+  ];
   return buildPhase2BDryRunReport({ organisationId, rows });
 }
 
