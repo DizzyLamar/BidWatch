@@ -167,6 +167,7 @@ function boundedLimit(value: number | undefined): number {
 function validCursor(cursor: OpportunityCursor): boolean {
   return UUID_PATTERN.test(cursor.id)
     && typeof cursor.updatedAt === 'string'
+    && /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(cursor.updatedAt)
     && Number.isFinite(Date.parse(cursor.updatedAt));
 }
 
@@ -203,7 +204,8 @@ export function createProcurementReadRepository(
 
       if (options.state) query = query.eq('state', options.state);
       if (options.cursor) {
-        const timestamp = new Date(options.cursor.updatedAt).toISOString();
+        // Preserve PostgreSQL timestamp precision (up to microseconds); Date would truncate it to milliseconds.
+        const timestamp = options.cursor.updatedAt;
         query = query.or(
           `updated_at.lt.${timestamp},and(updated_at.eq.${timestamp},id.lt.${options.cursor.id})`,
         );
