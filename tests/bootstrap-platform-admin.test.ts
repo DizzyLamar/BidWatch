@@ -36,6 +36,8 @@ test('bootstrap verifies the Auth identity before granting platform access', asy
 
 test('bootstrap provisions a verified first owner, global profile, membership and platform admin idempotently', async () => {
   const writes: Array<{ table: string; value: unknown }> = [];
+  let platformAdminInserted = false;
+  let membershipInserted: any = null;
   const authUser = {
     id: userId,
     email: 'owner@example.com',
@@ -59,12 +61,16 @@ test('bootstrap provisions a verified first owner, global profile, membership an
         insert: async (value: unknown) => { writes.push({ table, value }); return { error: null }; },
       };
       if (table === 'organisation_members') return {
-        upsert: async (value: unknown) => { writes.push({ table, value }); return { error: null }; },
-        select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { user_id: userId, role_id: ownerRoleId, status: 'active' }, error: null }) }) }) }),
+        upsert: async (value: unknown) => { writes.push({ table, value }); membershipInserted = value; return { error: null }; },
+        select: () => ({
+          eq: (column: string) => column === 'user_id'
+            ? { limit: async () => ({ data: [], error: null }) }
+            : { eq: () => ({ maybeSingle: async () => ({ data: membershipInserted ? { user_id: userId, role_id: ownerRoleId, status: 'active' } : null, error: null }) }) },
+        }),
       };
       if (table === 'platform_admins') return {
-        upsert: async (value: unknown) => { writes.push({ table, value }); return { error: null }; },
-        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { user_id: userId }, error: null }) }) }),
+        upsert: async (value: unknown) => { writes.push({ table, value }); platformAdminInserted = true; return { error: null }; },
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: platformAdminInserted ? { user_id: userId } : null, error: null }) }) }),
       };
       throw new Error(`Unexpected table: ${table}`);
     },
@@ -74,6 +80,8 @@ test('bootstrap provisions a verified first owner, global profile, membership an
   assert.equal(result.userId, userId);
   assert.equal(result.organisationId, organisationId);
   assert.equal(result.ownerRoleId, ownerRoleId);
+  assert.equal(result.alreadyProvisioned, false);
+  assert.equal(result.ownerMembershipProvisioned, true);
   assert.deepEqual(writes.map(write => write.table), [
     'organisation_roles', 'app_records', 'organisation_members', 'platform_admins',
   ]);
