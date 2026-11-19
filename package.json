@@ -11,11 +11,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.server.json --noEmit",
-    "test": "node --import tsx --test tests/scoped-records.test.ts tests/tenancy-middleware.test.ts tests/bootstrap-platform-admin.test.ts tests/scheduled-jobs.test.ts tests/procurement-repository.test.ts && node scripts/verify-repo.mjs",
+    "test": "node --import tsx --test tests/scoped-records.test.ts tests/tenancy-middleware.test.ts tests/bootstrap-platform-admin.test.ts tests/scheduled-jobs.test.ts tests/procurement-repository.test.ts tests/phase-2b-dry-run.test.ts && node scripts/verify-repo.mjs",
     "start": "tsx server.ts",
-    "test:integration": "node --import tsx --test tests/supabase-tenant-integration.test.ts tests/procurement-schema.integration.test.ts",
+    "test:integration": "node --import tsx --test tests/supabase-tenant-integration.test.ts tests/procurement-schema.integration.test.ts tests/phase-2b-dry-run.integration.test.ts",
     "test:browser": "node --import tsx --test tests/browser-tenant-isolation.test.ts",
-    "bootstrap:platform-admin": "tsx scripts/bootstrap-platform-admin.ts"
+    "bootstrap:platform-admin": "tsx scripts/bootstrap-platform-admin.ts",
+    "phase2b:dry-run": "tsx scripts/phase-2b-dry-run.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

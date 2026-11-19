@@ -79,6 +79,12 @@ jobs:
           export VITE_SUPABASE_PUBLISHABLE_KEY="$ANON_KEY"
           export BROWSER_TEST_PORT="$BROWSER_TEST_PORT"
           npm run build
+          export LOCAL_SUPABASE_URL="$API_URL"
+          export LOCAL_SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+          export PHASE2B_DRY_RUN=1
+          export PHASE2B_REPORT_PATH="artifacts/phase-2b-ci-dry-run.json"
+          npm run phase2b:dry-run
+          test -s "$PHASE2B_REPORT_PATH"
           npm run test:integration
           npx tsx scripts/migrate-legacy-attachments.ts
           npm install --no-save --package-lock=false playwright
