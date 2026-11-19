@@ -224,3 +224,8 @@ A freshly reset local database may contain no legacy discovery records; in that 
 
 ### Dry-run report completeness
 The read-only inventory report retains every row-level finding, not just a capped sample. Invalid imported tender UUIDs are quarantined before any UUID-column lookup, and malformed JSON records are handled before imported-reference extraction. These behaviours are covered by unit tests, including a report with more than 1,000 findings.
+
+
+### Bounded imported-tender validation
+
+Imported tender UUIDs are resolved in batches of at most 100 IDs per PostgREST request. Result pagination alone does not bound the URL/filter size of a single `.in(...)` request. The integration test treats global source-run counts as a lower bound because other integration suites may create independent global runs concurrently.
