@@ -580,24 +580,39 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
     }
 
     const ledgerCounts = await client.from('legacy_opportunity_backfill_records')
-      .select('legacy_collection,status').eq('organisation_id', legacy.organisationId);
+      .select('legacy_collection,status,legacy_record_id,findings').eq('organisation_id', legacy.organisationId);
     const ledger = await assertResult(ledgerCounts, 'Could not reconcile run ledger') || [];
+    const ledgerByCollection = Object.fromEntries(['opportunity_updates', 'opportunity_changes', 'opportunity_source_runs'].map(collection => [
+      collection,
+      countByStatus(ledger.filter((row: any) => row.legacy_collection === collection)),
+    ]));
+    const findingsByCode: Record<string, number> = {};
+    const quarantineRecords = ledger.filter((row: any) => row.status === 'quarantined');
+    for (const record of quarantineRecords) {
+      for (const finding of Array.isArray(record.findings) ? record.findings : []) {
+        const code = String(finding.code || 'unknown');
+        findingsByCode[code] = (findingsByCode[code] || 0) + 1;
+      }
+    }
     const runSummary = {
       ...summary,
       ledger: {
         records: ledger.length,
-        byCollection: Object.fromEntries(['opportunity_updates', 'opportunity_changes', 'opportunity_source_runs'].map(collection => [
-          collection, countByStatus(ledger.filter((row: any) => {
-            const _collection = collection;
-            return row.legacy_collection === _collection;
-          })),
-        ])),
+        byCollection: ledgerByCollection,
+        findingsByCode,
+        quarantinedLegacyRecordIds: quarantineRecords.map((row: any) => ({
+          collection: row.legacy_collection,
+          recordId: row.legacy_record_id,
+        })),
       },
       reconciliation: {
         updateRowsAccountedFor: ledger.filter((row: any) => row.legacy_collection === 'opportunity_updates').length,
         sourceRunRowsAccountedFor: ledger.filter((row: any) => row.legacy_collection === 'opportunity_source_runs').length,
         changeRowsAccountedFor: ledger.filter((row: any) => row.legacy_collection === 'opportunity_changes').length,
-        quarantinesRemain: ledger.some((row: any) => row.status === 'quarantined'),
+        updateRowsUnaccountedFor: Math.max(0, legacy.updates.length - ledger.filter((row: any) => row.legacy_collection === 'opportunity_updates').length),
+        sourceRunRowsUnaccountedFor: Math.max(0, legacy.runs.length - ledger.filter((row: any) => row.legacy_collection === 'opportunity_source_runs').length),
+        changeRowsUnaccountedFor: Math.max(0, legacy.changes.length - ledger.filter((row: any) => row.legacy_collection === 'opportunity_changes').length),
+        quarantinesRemain: quarantineRecords.length > 0,
         productionTouched: false,
       },
     };
