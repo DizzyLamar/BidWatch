@@ -47,6 +47,7 @@ test('Phase 2B dry-run inventories synthetic legacy records without changing the
     state: 'new',
     details: { publishedAt: timestamp, documents: [] },
   };
+  const baselineReport = await collectPhase2BDryRunReport(admin);
   const fixtureRows = [
     { id: updateId, table_name: 'opportunity_updates', record: commonUpdate, scope_type: 'organisation', organisation_id: organisationId },
     { id: importedUpdateId, table_name: 'opportunity_updates', record: { ...commonUpdate, reference: 'TEST/ICT/002', state: 'imported', importedTenderId: tenderId }, scope_type: 'organisation', organisation_id: organisationId },
@@ -76,16 +77,16 @@ test('Phase 2B dry-run inventories synthetic legacy records without changing the
     assert.ifError(afterResult.error);
 
     assert.equal(report.safety.databaseWrites, false);
-    assert.equal(report.baseline.collections.opportunity_updates, 3);
-    assert.equal(report.baseline.collections.opportunity_changes, 1);
+    assert.equal(report.baseline.collections.opportunity_updates - baselineReport.baseline.collections.opportunity_updates, 3);
+    assert.equal(report.baseline.collections.opportunity_changes - baselineReport.baseline.collections.opportunity_changes, 1);
     assert.ok(report.baseline.collections.opportunity_source_runs >= 1,
       'the synthetic global run must be present; other integration tests may add their own global runs concurrently');
-    assert.equal(report.baseline.collections.tenders, 1);
-    assert.equal(report.validation.migratableUpdateCandidates, 2);
-    assert.equal(report.validation.quarantinedUpdateCandidates, 1);
-    assert.equal(report.validation.migratableSourceRunCandidates, 1);
-    assert.equal(report.history.changesLinkedToKnownUpdates, 1);
-    assert.equal(report.history.reconstructableFullSnapshots, 0);
+    assert.equal(report.baseline.collections.tenders - baselineReport.baseline.collections.tenders, 1);
+    assert.equal(report.validation.migratableUpdateCandidates - baselineReport.validation.migratableUpdateCandidates, 2);
+    assert.equal(report.validation.quarantinedUpdateCandidates - baselineReport.validation.quarantinedUpdateCandidates, 1);
+    assert.equal(report.validation.migratableSourceRunCandidates - baselineReport.validation.migratableSourceRunCandidates, 1);
+    assert.equal(report.history.changesLinkedToKnownUpdates - baselineReport.history.changesLinkedToKnownUpdates, 1);
+    assert.equal(report.history.reconstructableFullSnapshots - baselineReport.history.reconstructableFullSnapshots, 0);
     assert.deepEqual(afterResult.data, beforeResult.data, 'Dry-run must not mutate legacy app_records rows.');
   } finally {
     const cleanup = await admin.from('app_records').delete().in('id', fixtureRows.map(row => row.id));
