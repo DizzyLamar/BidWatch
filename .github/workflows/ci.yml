@@ -105,7 +105,7 @@ jobs:
   deploy:
     name: Deploy to Render
     needs: [verify, tenant-integration]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message != 'Complete Phase 2B resumable legacy backfill' && github.event.head_commit.message != 'Pause deployment for Phase 2B merge safety' && github.event.head_commit.message != 'Fix Phase 2B source-run access-method allowlist'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'Complete Phase 2B resumable legacy backfill') && !contains(github.event.head_commit.message, 'Pause deployment for Phase 2B merge safety') && !contains(github.event.head_commit.message, 'Fix Phase 2B source-run access-method allowlist')
     runs-on: ubuntu-latest
     timeout-minutes: 18
     steps:
