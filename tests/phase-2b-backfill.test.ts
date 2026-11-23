@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reconstructHistorySnapshots } from '../scripts/phase-2b-backfill';
+import { reconstructHistorySnapshots, runPhase2BBackfill } from '../scripts/phase-2b-backfill';
 
 const current = {
   title: 'Final title', organisation: 'Public buyer', reference: 'REF-1',
@@ -52,4 +52,11 @@ test('Phase 2B quarantines unsupported legacy history fields', () => {
   }]);
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.reason, /unsupported/);
+});
+
+test('Phase 2B writer rejects a non-local Supabase client before any query', async () => {
+  await assert.rejects(
+    () => runPhase2BBackfill({ supabaseUrl: 'https://production-project.supabase.co' }),
+    /permanently restricted to localhost/,
+  );
 });
