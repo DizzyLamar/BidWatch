@@ -254,6 +254,12 @@ eval "$(npx supabase status -o env)"
 
 export LOCAL_SUPABASE_URL="$API_URL"
 export LOCAL_SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+
+# Read-only preflight first; inspect the report and quarantine findings.
+export PHASE2B_DRY_RUN=1
+npm run phase2b:dry-run
+unset PHASE2B_DRY_RUN
+
 export PHASE2B_BACKFILL=1
 # Set this only after reviewing the output from npm run phase2b:dry-run.
 export PHASE2B_BACKFILL_CONFIRM=REVIEWED_LOCAL_DRY_RUN
