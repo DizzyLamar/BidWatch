@@ -59,6 +59,19 @@ test('dry-run quarantines dismissed rows without a real dismissal timestamp', ()
   assert.equal(report.validation.findingsByCode.dismissal_timestamp_unresolved, 1);
 });
 
+test('dry-run quarantines malformed optional deadline and publication timestamps', () => {
+  const report = buildPhase2BDryRunReport({
+    organisationId: ORG,
+    rows: [row(UPDATE, 'opportunity_updates', update({
+      deadline: '2026-02-31T10:00:00.000Z',
+      details: { publishedAt: 'not-a-date', documents: [] },
+    }))],
+  });
+  assert.equal(report.validation.quarantinedUpdateCandidates, 1);
+  assert.equal(report.validation.findingsByCode.invalid_deadline, 1);
+  assert.equal(report.validation.findingsByCode.invalid_published_at, 1);
+});
+
 test('dry-run rejects impossible calendar timestamps and invalid URL schemes', () => {
   const report = buildPhase2BDryRunReport({
     organisationId: ORG,
