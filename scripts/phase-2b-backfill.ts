@@ -657,8 +657,11 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
           status: 'migrated', targetIds: { source_run_id: targetRunId } });
         summary.migrated.opportunity_source_runs += 1;
       } catch (error) {
+        const partialRunId = deterministicUuid('opportunity_source_runs:' + row.id);
+        const partialResult = await client.from('procurement_source_runs').select('id').eq('id', partialRunId).maybeSingle();
         await writeLedger(client, { collection: 'opportunity_source_runs', recordId: row.id, runId, organisationId: legacy.organisationId,
-          status: 'quarantined', findings: [{ recordId: row.id, collection: row.table_name, code: 'target_write_failed',
+          status: 'quarantined', targetIds: partialResult.data?.id ? { source_run_id: String(partialResult.data.id) } : {},
+          findings: [{ recordId: row.id, collection: row.table_name, code: 'target_write_failed',
             message: error instanceof Error ? error.message : String(error) }] });
         summary.quarantined.opportunity_source_runs += 1;
       }
