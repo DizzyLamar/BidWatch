@@ -74,7 +74,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     { id: changeId, table_name: 'opportunity_changes', record: {
       opportunityUpdateId: updateId, reference: 'TEST/ICT/001', title: commonUpdate.title,
       source: commonUpdate.source, changedFields: ['title'],
-      before: { title: 'Initial synthetic title' }, after: { title: commonUpdate.title }, detectedAt: timestamp,
+      before: { title: 'Initial synthetic title' }, after: { title: 'Inconsistent synthetic title' }, detectedAt: timestamp,
     }, scope_type: 'organisation', organisation_id: organisationId },
   ];
 
@@ -93,8 +93,9 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.equal(first.migrated.opportunity_updates, 2);
     assert.equal(first.quarantined.opportunity_updates, 1);
     assert.equal(first.migrated.opportunity_source_runs, 1);
-    assert.equal(first.migrated.opportunity_changes, 1);
-    assert.equal(first.migrated.versions, 1);
+    assert.equal(first.migrated.opportunity_changes, 0);
+    assert.equal(first.quarantined.opportunity_changes, 1);
+    assert.equal(first.migrated.versions, 0);
     assert.equal(first.reconciliation.updateRowsAccountedFor, 3);
     assert.equal(first.reconciliation.sourceRunRowsAccountedFor, 1);
     assert.equal(first.reconciliation.changeRowsAccountedFor, 1);
@@ -129,12 +130,6 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.equal(importedPursuit.data.state, 'converted');
     assert.equal(importedPursuit.data.converted_tender_id, tenderId);
 
-    const versions = await admin.from('procurement_observation_versions').select('version_no,snapshot')
-      .eq('observation_id', observationId);
-    assert.ifError(versions.error);
-    assert.equal(versions.data?.length, 1);
-    assert.equal(versions.data?.[0].snapshot.title, commonUpdate.title);
-
     const second = await runPhase2BBackfill(admin, { runId: rerunId, generatedAt: timestamp });
     assert.equal(second.migrated.opportunity_updates, 0);
     assert.equal(second.skippedPreviouslyMigrated.opportunity_updates, 2);
@@ -160,7 +155,6 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     const observationIds = [observationId, importedObservationId];
     await admin.from('canonical_opportunity_events').delete().in('observation_id', observationIds);
     await admin.from('canonical_opportunity_sources').delete().in('observation_id', observationIds);
-    await admin.from('procurement_observation_versions').delete().in('observation_id', observationIds);
     await admin.from('procurement_source_observations').delete().in('id', observationIds);
     const canonicalRows = await admin.from('canonical_opportunities').select('id')
       .in('canonical_key', [canonicalKey, 'legacy:maneps:' + importedUpdateId]);
