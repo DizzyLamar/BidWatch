@@ -71,7 +71,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     { id: invalidDateUpdateId, table_name: 'opportunity_updates', record: {
       ...commonUpdate, reference: 'TEST/ICT/004', deadline: '2026-02-31T10:00:00.000Z',
     }, scope_type: 'organisation', organisation_id: organisationId },
-    { id: malformedUpdateId, table_name: 'opportunity_updates', record: null as any, scope_type: 'organisation', organisation_id: organisationId },
+    { id: malformedUpdateId, table_name: 'opportunity_updates', record: [] as any, scope_type: 'organisation', organisation_id: organisationId },
     { id: tenderId, table_name: 'tenders', record: { title: 'Synthetic imported tender' }, scope_type: 'organisation', organisation_id: organisationId },
     { id: sourceRunId, table_name: 'opportunity_source_runs', record: {
       sourceId: 'maneps', source: 'MANePS procurement notices', sourceUrl: 'https://maneps.mw/procurement-notice',
