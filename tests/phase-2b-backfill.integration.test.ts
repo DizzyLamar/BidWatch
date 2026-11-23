@@ -1,12 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { parseLocalSupabaseUrl } from '../scripts/phase-2b-dry-run';
 import { runPhase2BBackfill } from '../scripts/phase-2b-backfill';
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const serviceKey = process.env.SUPABASE_SECRET_KEY || '';
+
+function deterministicUuid(value: string) {
+  const bytes = createHash('sha256').update('bidwatch-phase2b:' + value).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+}
 
 test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves legacy rows', async () => {
   assert.ok(supabaseUrl && serviceKey, 'Export local Supabase URL and service-role key before running this integration test.');
@@ -73,12 +81,8 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
   const inserted = await admin.from('app_records').insert(fixtureRows);
   assert.ifError(inserted.error);
 
-  const deterministicObservationId = (await import('node:crypto')).createHash('sha256')
-    .update('bidwatch-phase2b:observation:maneps:' + updateId).digest().subarray(0, 16);
-  deterministicObservationId[6] = (deterministicObservationId[6] & 0x0f) | 0x50;
-  deterministicObservationId[8] = (deterministicObservationId[8] & 0x3f) | 0x80;
-  const hex = deterministicObservationId.toString('hex');
-  const observationId = hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+  const observationId = deterministicUuid('observation:maneps:' + updateId);
+  const importedObservationId = deterministicUuid('observation:maneps:' + importedUpdateId);
   const canonicalKey = 'legacy:maneps:' + updateId;
 
   try {
@@ -153,8 +157,11 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     await admin.from('legacy_opportunity_backfill_records').delete().in('legacy_record_id',
       [updateId, importedUpdateId, dismissedUpdateId, sourceRunId, changeId]);
     await admin.from('legacy_opportunity_backfill_runs').delete().in('id', [runId, rerunId]);
-    await admin.from('canonical_opportunity_events').delete().eq('observation_id', observationId);
-    await admin.from('canonical_opportunity_sources').delete().eq('observation_id', observationId);
+    const observationIds = [observationId, importedObservationId];
+    await admin.from('canonical_opportunity_events').delete().in('observation_id', observationIds);
+    await admin.from('canonical_opportunity_sources').delete().in('observation_id', observationIds);
+    await admin.from('procurement_observation_versions').delete().in('observation_id', observationIds);
+    await admin.from('procurement_source_observations').delete().in('id', observationIds);
     const canonicalRows = await admin.from('canonical_opportunities').select('id')
       .in('canonical_key', [canonicalKey, 'legacy:maneps:' + importedUpdateId]);
     if (canonicalRows.data?.length) {
@@ -162,8 +169,6 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
       await admin.from('organisation_opportunities').delete().in('canonical_opportunity_id', canonicalIds);
       await admin.from('canonical_opportunities').delete().in('id', canonicalIds);
     }
-    await admin.from('procurement_observation_versions').delete().eq('observation_id', observationId);
-    await admin.from('procurement_source_observations').delete().eq('id', observationId);
     if (targetRunId) await admin.from('procurement_source_runs').delete().eq('id', targetRunId);
     await admin.from('app_records').delete().in('id', fixtureRows.map(row => row.id));
   }
