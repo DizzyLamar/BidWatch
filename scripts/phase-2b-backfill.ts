@@ -424,7 +424,7 @@ async function migrateUpdate(client: any, row: LegacyRow, organisationId: string
   if (existingObservation) {
     const fields = Object.keys(observation) as Array<keyof typeof observation>;
     for (const field of fields) {
-      if (!sameJson(existingObservation[field as string], observation[field])) {
+      if (!sameField(String(field), existingObservation[field as string], observation[field])) {
         throw new Error('Existing source observation differs from the deterministic legacy mapping; refusing to overwrite it.');
       }
     }
