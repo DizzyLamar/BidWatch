@@ -24,7 +24,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const UPDATE_BLOCKING = new Set([
   'invalid_record_id', 'invalid_record_shape', 'scope_mismatch', 'unknown_source', 'missing_title',
   'invalid_notice_url', 'invalid_first_seen', 'invalid_last_seen', 'seen_order_invalid',
-  'unknown_update_state', 'invalid_fit_level', 'invalid_relevance_score', 'invalid_categories',
+  'unknown_update_state', 'invalid_fit_level', 'invalid_relevance_score', 'invalid_categories', 'invalid_deadline', 'invalid_published_at',
   'invalid_matched_terms', 'invalid_details', 'invalid_documents', 'dismissal_timestamp_unresolved',
   'imported_tender_invalid_id', 'imported_tender_missing', 'imported_tender_scope_mismatch',
   'imported_tender_invalid',
@@ -207,7 +207,7 @@ function selectLegacyBatch(legacy: Awaited<ReturnType<typeof loadLegacy>>, reque
     requested.has(row.id) || (isObject(row.record) && updateIds.has(String(row.record.opportunityUpdateId || ''))));
   const runs = legacy.runs.filter(row => requested.has(row.id));
   const referencedTenderIds = new Set(updates
-    .filter(row => row.record.state === 'imported' && typeof row.record.importedTenderId === 'string')
+    .filter(row => isObject(row.record) && row.record.state === 'imported' && typeof row.record.importedTenderId === 'string')
     .map(row => String(row.record.importedTenderId).toLowerCase()));
   const tenders = legacy.tenders.filter(row => referencedTenderIds.has(row.id.toLowerCase()));
   const selected = { ...legacy, updates, changes, runs, tenders };
