@@ -394,6 +394,8 @@ async function migrateChangesForUpdate(
   updateRow: LegacyRow,
   changeRows: LegacyRow[],
   observationId: string,
+  runId: string,
+  organisationId: string,
 ) {
   const related = changeRows.filter(row => isObject(row.record) && row.record.opportunityUpdateId === updateRow.id);
   if (!related.length) return { migrated: 0, quarantined: 0, versions: 0 };
@@ -401,8 +403,8 @@ async function migrateChangesForUpdate(
   if (!reconstructed.ok) {
     for (const row of related) {
       await writeLedger(client, {
-        collection: 'opportunity_changes', recordId: row.id, runId: activeRunId,
-        organisationId: activeOrganisationId, status: 'quarantined',
+        collection: 'opportunity_changes', recordId: row.id, runId,
+        organisationId, status: 'quarantined',
         targetIds: { observation_id: observationId },
         findings: [{ recordId: row.id, collection: row.table_name, code: 'history_not_reconstructable', message: reconstructed.reason }],
       });
@@ -442,20 +444,17 @@ async function migrateChangesForUpdate(
 
   for (const row of related) {
     await writeLedger(client, {
-      collection: 'opportunity_changes', recordId: row.id, runId: activeRunId,
-      organisationId: activeOrganisationId, status: 'migrated',
+      collection: 'opportunity_changes', recordId: row.id, runId,
+      organisationId, status: 'migrated',
       targetIds: { observation_id: observationId, ...(idsByChange.get(row.id) ? { version_id: idsByChange.get(row.id)! } : {}) },
     });
   }
   return { migrated: related.length, quarantined: 0, versions: insertedCount };
 }
 
-let activeRunId = '';
-let activeOrganisationId = '';
 
 export async function runPhase2BBackfill(client: any, options: { runId?: string; generatedAt?: string } = {}) {
   const legacy = await loadLegacy(client);
-  activeOrganisationId = legacy.organisationId;
   const allRows = [...legacy.updates, ...legacy.changes, ...legacy.runs, ...legacy.tenders];
   const dryRun = buildPhase2BDryRunReport({ organisationId: legacy.organisationId, rows: allRows, generatedAt: options.generatedAt });
   const findings = dryRun.validation.findings as Finding[];
@@ -469,7 +468,6 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
 
   const runId = options.runId || randomUUID();
   if (!UUID.test(runId)) throw new Error('PHASE2B_RUN_ID must be a valid UUID.');
-  activeRunId = runId;
   await ensureRun(client, runId, legacy.organisationId);
   const summary = {
     runId,
@@ -572,14 +570,14 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
       if (!related.length) continue;
       const pending = related.filter(row => !migratedChanges.has(row.id));
       if (!pending.length) continue;
-      const history = await migrateChangesForUpdate(client, updateRow, related, observationId);
+      const history = await migrateChangesForUpdate(client, updateRow, related, observationId, runId, legacy.organisationId);
       summary.migrated.opportunity_changes += history.migrated;
       summary.quarantined.opportunity_changes += history.quarantined;
       summary.migrated.versions += history.versions;
     }
 
     const ledgerCounts = await client.from('legacy_opportunity_backfill_records')
-      .select('legacy_collection,status').eq('run_id', runId);
+      .select('legacy_collection,status').eq('organisation_id', legacy.organisationId);
     const ledger = await assertResult(ledgerCounts, 'Could not reconcile run ledger') || [];
     const runSummary = {
       ...summary,
@@ -622,7 +620,9 @@ async function main() {
   const client = createClient(url.toString(), key, {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
-  const summary = await runPhase2BBackfill(client, { runId: process.env.PHASE2B_RUN_ID || undefined });
+  const runId = process.env.PHASE2B_RUN_ID || randomUUID();
+  process.stdout.write('Phase 2B backfill run ID: ' + runId + '\\n');
+  const summary = await runPhase2BBackfill(client, { runId });
   const outputPath = resolve(process.env.PHASE2B_BACKFILL_REPORT_PATH || 'artifacts/phase-2b-backfill-report.json');
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(summary, null, 2) + '\n', { mode: 0o600 });
