@@ -36,6 +36,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
   const changeId = randomUUID();
   const runId = randomUUID();
   const rerunId = randomUUID();
+  const conflictRunId = randomUUID();
   const timestamp = '2026-11-02T10:00:00.000Z';
   const commonUpdate = {
     sourceId: 'maneps',
@@ -143,6 +144,29 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.equal(second.skippedPreviouslyMigrated.opportunity_source_runs, 1);
     assert.equal(second.reconciliation.updateRowsAccountedFor, 3);
 
+    // Simulate an interrupted migration with a target pursuit subsequently changed
+    // by an operator. Removing only the checkpoint forces a retry; the writer must
+    // quarantine the conflict instead of restoring stale legacy workflow state.
+    const changedPursuit = await admin.from('organisation_opportunities').update({ state: 'watching' })
+      .eq('organisation_id', organisationId).eq('canonical_opportunity_id', canonical.data.id);
+    assert.ifError(changedPursuit.error);
+    const removeCheckpoint = await admin.from('legacy_opportunity_backfill_records').delete()
+      .eq('legacy_collection', 'opportunity_updates').eq('legacy_record_id', updateId);
+    assert.ifError(removeCheckpoint.error);
+
+    await runPhase2BBackfill(admin, { runId: conflictRunId, generatedAt: timestamp });
+    const preservedPursuit = await admin.from('organisation_opportunities').select('state')
+      .eq('organisation_id', organisationId).eq('canonical_opportunity_id', canonical.data.id).single();
+    assert.ifError(preservedPursuit.error);
+    assert.equal(preservedPursuit.data.state, 'watching', 'A retry must not overwrite organisation workflow changes.');
+    const conflictLedger = await admin.from('legacy_opportunity_backfill_records')
+      .select('status,target_ids,findings').eq('legacy_collection', 'opportunity_updates')
+      .eq('legacy_record_id', updateId).single();
+    assert.ifError(conflictLedger.error);
+    assert.equal(conflictLedger.data.status, 'quarantined');
+    assert.equal(conflictLedger.data.target_ids.organisation_opportunity_id, pursuit.data.id);
+    assert.ok(conflictLedger.data.findings.some((finding: any) => finding.code === 'target_write_failed'));
+
     const after = await admin.from('app_records').select('id,record,updated_at').in('id', fixtureRows.map(row => row.id)).order('id');
     assert.ifError(after.error);
     assert.deepEqual(after.data, before.data, 'Backfill must never modify or delete legacy app_records.');
@@ -157,7 +181,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     const targetRunId = sourceRunLedger.data?.target_ids?.source_run_id;
     await admin.from('legacy_opportunity_backfill_records').delete().in('legacy_record_id',
       [updateId, importedUpdateId, dismissedUpdateId, sourceRunId, changeId]);
-    await admin.from('legacy_opportunity_backfill_runs').delete().in('id', [runId, rerunId]);
+    await admin.from('legacy_opportunity_backfill_runs').delete().in('id', [runId, rerunId, conflictRunId]);
     const observationIds = [observationId, importedObservationId];
     await admin.from('canonical_opportunity_events').delete().in('observation_id', observationIds);
     await admin.from('canonical_opportunity_sources').delete().in('observation_id', observationIds);
