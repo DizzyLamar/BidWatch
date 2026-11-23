@@ -378,6 +378,34 @@ async function ensureLinkEvent(client: any, observationId: string, canonicalId: 
   await assertResult(inserted, 'Could not persist canonical source-link audit event');
 }
 
+async function inspectPartialUpdateTargets(client: any, row: LegacyRow, organisationId: string, sourceId: string) {
+  const ids: Record<string, string> = {};
+  const sourceKey = 'legacy-app-record:' + row.id;
+  const observationResult = await client.from('procurement_source_observations').select('id')
+    .eq('source_id', sourceId).eq('source_key', sourceKey).maybeSingle();
+  if (observationResult.data?.id) ids.observation_id = String(observationResult.data.id);
+
+  const canonicalKey = 'legacy:' + row.record.sourceId + ':' + row.id;
+  const canonicalResult = await client.from('canonical_opportunities').select('id')
+    .eq('canonical_key', canonicalKey).maybeSingle();
+  if (canonicalResult.data?.id) ids.canonical_opportunity_id = String(canonicalResult.data.id);
+
+  if (ids.observation_id) {
+    const linkResult = await client.from('canonical_opportunity_sources').select('id')
+      .eq('observation_id', ids.observation_id).in('review_status', ['automatic', 'pending_review', 'confirmed']).maybeSingle();
+    if (linkResult.data?.id) ids.canonical_source_link_id = String(linkResult.data.id);
+    const eventId = deterministicUuid('source-linked-event:' + ids.observation_id);
+    const eventResult = await client.from('canonical_opportunity_events').select('id').eq('id', eventId).maybeSingle();
+    if (eventResult.data?.id) ids.canonical_source_event_id = String(eventResult.data.id);
+  }
+  if (ids.canonical_opportunity_id) {
+    const pursuitResult = await client.from('organisation_opportunities').select('id')
+      .eq('organisation_id', organisationId).eq('canonical_opportunity_id', ids.canonical_opportunity_id).maybeSingle();
+    if (pursuitResult.data?.id) ids.organisation_opportunity_id = String(pursuitResult.data.id);
+  }
+  return ids;
+}
+
 async function migrateUpdate(client: any, row: LegacyRow, organisationId: string, sourceIds: Map<string, string>, tenderRows: LegacyRow[]) {
   const sourceId = sourceIds.get(String(row.record.sourceId));
   if (!sourceId) throw new Error('Validated source key was not present in source registry.');
@@ -582,8 +610,10 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
         summary.migrated.observations += 1;
         summary.migrated.pursuits += 1;
       } catch (error) {
+        const sourceId = sourceIds.get(String(row.record.sourceId));
+        const partialTargets = sourceId ? await inspectPartialUpdateTargets(client, row, legacy.organisationId, sourceId) : {};
         await writeLedger(client, { collection: 'opportunity_updates', recordId: row.id, runId, organisationId: legacy.organisationId,
-          status: 'quarantined', findings: [{ recordId: row.id, collection: row.table_name, code: 'target_write_failed',
+          status: 'quarantined', targetIds: partialTargets, findings: [{ recordId: row.id, collection: row.table_name, code: 'target_write_failed',
             message: error instanceof Error ? error.message : String(error) }] });
         summary.quarantined.opportunity_updates += 1;
       }
