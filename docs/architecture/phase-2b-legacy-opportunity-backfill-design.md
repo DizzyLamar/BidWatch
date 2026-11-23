@@ -271,6 +271,8 @@ npm run phase2b:backfill
 
 The command prints the run ID before writing and emits a mode-0600 report at `artifacts/phase-2b-backfill-report.json` by default. If interrupted, rerun with the same `PHASE2B_RUN_ID`. A completed run cannot be resumed; use a new UUID for an idempotency verification pass.
 
+For bounded batches, set `PHASE2B_BACKFILL_RECORD_IDS` to a comma-separated list of legacy `app_records.id` UUIDs. Selecting an opportunity update automatically includes its linked change rows and any same-organisation tender it references. Selecting a source-run ID includes only that run. If the variable is unset, the command processes the full legacy workspace; an explicitly empty value selects no legacy rows and is used by CI to smoke-test the write path without touching seeded data. Unresolved requested IDs are reported.
+
 ### Write and recovery semantics
 
 - Source registry entries are inserted by stable source key when absent; existing entries must match the adapter definition and are never reset or overwritten.
