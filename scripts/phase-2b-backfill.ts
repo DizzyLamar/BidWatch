@@ -4,6 +4,7 @@ import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import {
   buildPhase2BDryRunReport,
+  LEGACY_ACCESS_METHODS,
   LEGACY_SOURCES,
   parseLocalSupabaseUrl,
   readAllRows,
@@ -30,7 +31,7 @@ const UPDATE_BLOCKING = new Set([
 ]);
 const RUN_BLOCKING = new Set([
   'invalid_record_id', 'invalid_record_shape', 'run_scope_mismatch', 'unknown_run_source',
-  'unknown_run_status', 'unknown_scan_type', 'invalid_fetchedCount', 'invalid_parsedCount',
+  'unknown_run_status', 'unknown_scan_type', 'invalid_access_method', 'invalid_fetchedCount', 'invalid_parsedCount',
   'invalid_relevantCount', 'invalid_failedCount', 'invalid_checked_at', 'invalid_duration',
 ]);
 const HISTORY_FIELDS = new Set([
@@ -299,7 +300,7 @@ function sourceRunPayload(row: LegacyRow, sourceId: string) {
     safe_message: null,
     metadata: {
       legacy_record_id: row.id,
-      access_method: typeof item.accessMethod === 'string' ? item.accessMethod : null,
+      access_method: item.accessMethod != null && LEGACY_ACCESS_METHODS.has(String(item.accessMethod)) ? String(item.accessMethod) : null,
       duration_ms: duration,
       started_at_derivation: duration == null ? 'checkedAt; duration unavailable in legacy record' : 'checkedAt minus durationMs',
     },

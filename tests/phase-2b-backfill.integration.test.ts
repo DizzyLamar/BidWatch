@@ -33,6 +33,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
   const dismissedUpdateId = randomUUID();
   const tenderId = randomUUID();
   const sourceRunId = randomUUID();
+  const invalidSourceRunId = randomUUID();
   const changeId = randomUUID();
   const runId = randomUUID();
   const rerunId = randomUUID();
@@ -72,6 +73,12 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
       fetchedCount: 4, parsedCount: 4, relevantCount: 2, failedCount: 0,
       durationMs: 900, checkedAt: timestamp, message: 'Synthetic integration fixture.',
     }, scope_type: 'global', organisation_id: null },
+    { id: invalidSourceRunId, table_name: 'opportunity_source_runs', record: {
+      sourceId: 'maneps', source: 'MANePS procurement notices', sourceUrl: 'https://maneps.mw/procurement-notice',
+      status: 'ok', accessMethod: 'raw-html-with-cookies=secret', scanType: 'scheduled',
+      fetchedCount: 1, parsedCount: 1, relevantCount: 0, failedCount: 0,
+      durationMs: 100, checkedAt: timestamp,
+    }, scope_type: 'global', organisation_id: null },
     { id: changeId, table_name: 'opportunity_changes', record: {
       opportunityUpdateId: updateId, reference: 'TEST/ICT/001', title: commonUpdate.title,
       source: commonUpdate.source, changedFields: ['title'],
@@ -90,18 +97,27 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     const before = await admin.from('app_records').select('id,record,updated_at').in('id', fixtureRows.map(row => row.id)).order('id');
     assert.ifError(before.error);
 
-    const first = await runPhase2BBackfill(admin, { runId, generatedAt: timestamp, recordIds: fixtureRows.map(row => row.id) });
+    const first = await runPhase2BBackfill(admin, { runId, generatedAt: timestamp, recordIds: [...fixtureRows.map(row => row.id), invalidSourceRunId] });
     assert.equal(first.migrated.opportunity_updates, 2);
     assert.equal(first.quarantined.opportunity_updates, 1);
     assert.equal(first.migrated.opportunity_source_runs, 1);
+    assert.equal(first.quarantined.opportunity_source_runs, 1);
     assert.equal(first.migrated.opportunity_changes, 0);
     assert.equal(first.quarantined.opportunity_changes, 1);
     assert.equal(first.migrated.versions, 0);
     assert.equal(first.reconciliation.updateRowsAccountedFor, 3);
-    assert.equal(first.reconciliation.sourceRunRowsAccountedFor, 1);
+    assert.equal(first.reconciliation.sourceRunRowsAccountedFor, 2);
     assert.equal(first.reconciliation.changeRowsAccountedFor, 1);
     assert.equal(first.reconciliation.quarantinesRemain, true);
     assert.equal(first.reconciliation.productionTouched, false);
+
+    const invalidRunLedger = await admin.from('legacy_opportunity_backfill_records')
+      .select('status,target_ids,findings').eq('legacy_collection', 'opportunity_source_runs')
+      .eq('legacy_record_id', invalidSourceRunId).single();
+    assert.ifError(invalidRunLedger.error);
+    assert.equal(invalidRunLedger.data.status, 'quarantined');
+    assert.equal(invalidRunLedger.data.target_ids.source_run_id, undefined);
+    assert.ok(invalidRunLedger.data.findings.some((finding: any) => finding.code === 'invalid_access_method'));
 
     const observation = await admin.from('procurement_source_observations').select('id,source_key,raw_payload')
       .eq('source_key', 'legacy-app-record:' + updateId).single();
@@ -142,6 +158,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.equal(second.skippedPreviouslyMigrated.opportunity_changes, 0);
     assert.equal(second.quarantined.opportunity_changes, 1);
     assert.equal(second.skippedPreviouslyMigrated.opportunity_source_runs, 1);
+    assert.equal(second.quarantined.opportunity_source_runs, 1);
     assert.equal(second.reconciliation.updateRowsAccountedFor, 3);
 
     // Simulate an interrupted migration with a target pursuit subsequently changed
@@ -180,7 +197,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
       .eq('legacy_collection', 'opportunity_source_runs').eq('legacy_record_id', sourceRunId).maybeSingle();
     const targetRunId = sourceRunLedger.data?.target_ids?.source_run_id;
     const ledgerCleanup = await admin.from('legacy_opportunity_backfill_records').delete().in('legacy_record_id',
-      [updateId, importedUpdateId, dismissedUpdateId, sourceRunId, changeId]);
+      [updateId, importedUpdateId, dismissedUpdateId, sourceRunId, invalidSourceRunId, changeId]);
     assert.ifError(ledgerCleanup.error);
     const runCleanup = await admin.from('legacy_opportunity_backfill_runs').delete().in('id', [runId, rerunId, conflictRunId]);
     assert.ifError(runCleanup.error);

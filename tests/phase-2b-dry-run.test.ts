@@ -179,6 +179,33 @@ test('local Supabase URL guard accepts IPv4, hostname and bracketed IPv6 loopbac
   assert.throws(() => parseLocalSupabaseUrl('http://user:pass@localhost:54321'), /permanently restricted to localhost/);
 });
 
+test('dry-run quarantines unknown source-run access methods instead of copying them', () => {
+  for (const accessMethod of ['public-page', 'public-ocds-api']) {
+    const valid = buildPhase2BDryRunReport({
+      organisationId: ORG,
+      rows: [row(RUN, 'opportunity_source_runs', {
+        sourceId: 'maneps', status: 'ok', scanType: 'scheduled',
+        fetchedCount: 1, parsedCount: 1, relevantCount: 1, failedCount: 0,
+        checkedAt: '2026-11-02T10:00:00.000Z', durationMs: 100,
+        accessMethod,
+      }, 'global', null)],
+    });
+    assert.equal(valid.validation.migratableSourceRunCandidates, 1);
+  }
+
+  const invalid = buildPhase2BDryRunReport({
+    organisationId: ORG,
+    rows: [row(RUN, 'opportunity_source_runs', {
+      sourceId: 'maneps', status: 'ok', scanType: 'scheduled',
+      fetchedCount: 1, parsedCount: 1, relevantCount: 1, failedCount: 0,
+      checkedAt: '2026-11-02T10:00:00.000Z', durationMs: 100,
+      accessMethod: 'raw-html-with-cookies=secret',
+    }, 'global', null)],
+  });
+  assert.equal(invalid.validation.quarantinedSourceRunCandidates, 1);
+  assert.equal(invalid.validation.findingsByCode.invalid_access_method, 1);
+});
+
 test('dry-run quarantines non-object JSON records without aborting the report', () => {
   const malformed = null as unknown as Record<string, unknown>;
   const report = buildPhase2BDryRunReport({

@@ -25,6 +25,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const FIT_LEVELS = new Set(['direct', 'partner', 'peripheral']);
 const UPDATE_STATES = new Set(['new', 'imported', 'dismissed']);
 const RUN_STATUSES = new Set(['ok', 'error', 'authentication_required']);
+export const LEGACY_ACCESS_METHODS = new Set(['public-page', 'public-ocds-api']);
 const SCAN_TYPES = new Set(['scheduled', 'manual']);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
@@ -161,6 +162,9 @@ export function buildPhase2BDryRunReport(input: {
     if (typeof run.sourceId !== 'string' || !sourceKeys.has(run.sourceId)) addFinding(findings, row, 'unknown_run_source', 'Source run has an unknown sourceId.');
     if (!RUN_STATUSES.has(String(run.status))) addFinding(findings, row, 'unknown_run_status', 'Source run status is not supported by the target mapping.');
     if (!SCAN_TYPES.has(String(run.scanType))) addFinding(findings, row, 'unknown_scan_type', 'Source run scanType is not scheduled or manual.');
+    if (run.accessMethod != null && !LEGACY_ACCESS_METHODS.has(String(run.accessMethod))) {
+      addFinding(findings, row, 'invalid_access_method', 'Source run accessMethod is not in the application allowlist.');
+    }
     for (const field of ['fetchedCount', 'parsedCount', 'relevantCount', 'failedCount']) {
       const value = run[field];
       if (!Number.isInteger(value) || Number(value) < 0) addFinding(findings, row, 'invalid_' + field, field + ' must be a non-negative integer.');
@@ -211,7 +215,7 @@ export function buildPhase2BDryRunReport(input: {
     'imported_tender_scope_mismatch', 'imported_tender_invalid',
   ]);
   const blockedUpdateIds = new Set(findings.filter(f => f.collection === 'opportunity_updates' && blockingCodes.has(f.code)).map(f => f.recordId));
-  const runBlocking = new Set(['invalid_record_shape', 'run_scope_mismatch', 'unknown_run_source', 'unknown_run_status', 'unknown_scan_type',
+  const runBlocking = new Set(['invalid_record_shape', 'run_scope_mismatch', 'unknown_run_source', 'unknown_run_status', 'unknown_scan_type', 'invalid_access_method',
     'invalid_fetchedCount', 'invalid_parsedCount', 'invalid_relevantCount', 'invalid_failedCount', 'invalid_checked_at', 'invalid_duration']);
   const blockedRunIds = new Set(findings.filter(f => f.collection === 'opportunity_source_runs' && runBlocking.has(f.code)).map(f => f.recordId));
 
