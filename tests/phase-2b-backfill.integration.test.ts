@@ -80,10 +80,6 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
   const hex = deterministicObservationId.toString('hex');
   const observationId = hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
   const canonicalKey = 'legacy:maneps:' + updateId;
-  const sourceRunTargetId = (() => {
-    const bytes = (awaitableHash: never) => awaitableHash;
-    return bytes;
-  })();
 
   try {
     const before = await admin.from('app_records').select('id,record,updated_at').in('id', fixtureRows.map(row => row.id)).order('id');
@@ -151,6 +147,9 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.ifError(observationCount.error);
     assert.equal(observationCount.count, 1, 'Rerun must not create a duplicate observation.');
   } finally {
+    const sourceRunLedger = await admin.from('legacy_opportunity_backfill_records').select('target_ids')
+      .eq('legacy_collection', 'opportunity_source_runs').eq('legacy_record_id', sourceRunId).maybeSingle();
+    const targetRunId = sourceRunLedger.data?.target_ids?.source_run_id;
     await admin.from('legacy_opportunity_backfill_records').delete().in('legacy_record_id',
       [updateId, importedUpdateId, dismissedUpdateId, sourceRunId, changeId]);
     await admin.from('legacy_opportunity_backfill_runs').delete().in('id', [runId, rerunId]);
@@ -165,7 +164,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     }
     await admin.from('procurement_observation_versions').delete().eq('observation_id', observationId);
     await admin.from('procurement_source_observations').delete().eq('id', observationId);
-    await admin.from('procurement_source_runs').delete().eq('id', (await import('../scripts/phase-2b-backfill')).deterministicUuidForTest?.(sourceRunId) || '');
+    if (targetRunId) await admin.from('procurement_source_runs').delete().eq('id', targetRunId);
     await admin.from('app_records').delete().in('id', fixtureRows.map(row => row.id));
   }
 });
