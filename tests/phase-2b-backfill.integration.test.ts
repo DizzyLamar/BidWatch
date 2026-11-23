@@ -31,6 +31,8 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
   const updateId = randomUUID();
   const importedUpdateId = randomUUID();
   const dismissedUpdateId = randomUUID();
+  const invalidDateUpdateId = randomUUID();
+  const malformedUpdateId = randomUUID();
   const tenderId = randomUUID();
   const sourceRunId = randomUUID();
   const invalidSourceRunId = randomUUID();
@@ -66,6 +68,10 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     { id: updateId, table_name: 'opportunity_updates', record: commonUpdate, scope_type: 'organisation', organisation_id: organisationId },
     { id: importedUpdateId, table_name: 'opportunity_updates', record: { ...commonUpdate, reference: 'TEST/ICT/002', state: 'imported', importedTenderId: tenderId }, scope_type: 'organisation', organisation_id: organisationId },
     { id: dismissedUpdateId, table_name: 'opportunity_updates', record: { ...commonUpdate, reference: 'TEST/ICT/003', state: 'dismissed' }, scope_type: 'organisation', organisation_id: organisationId },
+    { id: invalidDateUpdateId, table_name: 'opportunity_updates', record: {
+      ...commonUpdate, reference: 'TEST/ICT/004', deadline: '2026-02-31T10:00:00.000Z',
+    }, scope_type: 'organisation', organisation_id: organisationId },
+    { id: malformedUpdateId, table_name: 'opportunity_updates', record: null as any, scope_type: 'organisation', organisation_id: organisationId },
     { id: tenderId, table_name: 'tenders', record: { title: 'Synthetic imported tender' }, scope_type: 'organisation', organisation_id: organisationId },
     { id: sourceRunId, table_name: 'opportunity_source_runs', record: {
       sourceId: 'maneps', source: 'MANePS procurement notices', sourceUrl: 'https://maneps.mw/procurement-notice',
@@ -97,15 +103,15 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     const before = await admin.from('app_records').select('id,record,updated_at').in('id', fixtureRows.map(row => row.id)).order('id');
     assert.ifError(before.error);
 
-    const first = await runPhase2BBackfill(admin, { runId, generatedAt: timestamp, recordIds: [...fixtureRows.map(row => row.id), invalidSourceRunId] });
+    const first = await runPhase2BBackfill(admin, { runId, generatedAt: timestamp, recordIds: fixtureRows.map(row => row.id) });
     assert.equal(first.migrated.opportunity_updates, 2);
-    assert.equal(first.quarantined.opportunity_updates, 1);
+    assert.equal(first.quarantined.opportunity_updates, 3);
     assert.equal(first.migrated.opportunity_source_runs, 1);
     assert.equal(first.quarantined.opportunity_source_runs, 1);
     assert.equal(first.migrated.opportunity_changes, 0);
     assert.equal(first.quarantined.opportunity_changes, 1);
     assert.equal(first.migrated.versions, 0);
-    assert.equal(first.reconciliation.updateRowsAccountedFor, 3);
+    assert.equal(first.reconciliation.updateRowsAccountedFor, 5);
     assert.equal(first.reconciliation.sourceRunRowsAccountedFor, 2);
     assert.equal(first.reconciliation.changeRowsAccountedFor, 1);
     assert.equal(first.reconciliation.quarantinesRemain, true);
@@ -118,6 +124,20 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.equal(invalidRunLedger.data.status, 'quarantined');
     assert.equal(invalidRunLedger.data.target_ids.source_run_id, undefined);
     assert.ok(invalidRunLedger.data.findings.some((finding: any) => finding.code === 'invalid_access_method'));
+
+    const invalidDateLedger = await admin.from('legacy_opportunity_backfill_records')
+      .select('status,findings').eq('legacy_collection', 'opportunity_updates')
+      .eq('legacy_record_id', invalidDateUpdateId).single();
+    assert.ifError(invalidDateLedger.error);
+    assert.equal(invalidDateLedger.data.status, 'quarantined');
+    assert.ok(invalidDateLedger.data.findings.some((finding: any) => finding.code === 'invalid_deadline'));
+
+    const malformedLedger = await admin.from('legacy_opportunity_backfill_records')
+      .select('status,findings').eq('legacy_collection', 'opportunity_updates')
+      .eq('legacy_record_id', malformedUpdateId).single();
+    assert.ifError(malformedLedger.error);
+    assert.equal(malformedLedger.data.status, 'quarantined');
+    assert.ok(malformedLedger.data.findings.some((finding: any) => finding.code === 'invalid_record_shape'));
 
     const observation = await admin.from('procurement_source_observations').select('id,source_key,raw_payload')
       .eq('source_key', 'legacy-app-record:' + updateId).single();
@@ -157,6 +177,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.equal(second.skippedPreviouslyMigrated.opportunity_updates, 2);
     assert.equal(second.skippedPreviouslyMigrated.opportunity_changes, 0);
     assert.equal(second.quarantined.opportunity_changes, 1);
+    assert.equal(second.quarantined.opportunity_updates, 3);
     assert.equal(second.skippedPreviouslyMigrated.opportunity_source_runs, 1);
     assert.equal(second.quarantined.opportunity_source_runs, 1);
     assert.equal(second.reconciliation.updateRowsAccountedFor, 3);
@@ -197,7 +218,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
       .eq('legacy_collection', 'opportunity_source_runs').eq('legacy_record_id', sourceRunId).maybeSingle();
     const targetRunId = sourceRunLedger.data?.target_ids?.source_run_id;
     const ledgerCleanup = await admin.from('legacy_opportunity_backfill_records').delete().in('legacy_record_id',
-      [updateId, importedUpdateId, dismissedUpdateId, sourceRunId, invalidSourceRunId, changeId]);
+      [updateId, importedUpdateId, dismissedUpdateId, invalidDateUpdateId, malformedUpdateId, sourceRunId, invalidSourceRunId, changeId]);
     assert.ifError(ledgerCleanup.error);
     const runCleanup = await admin.from('legacy_opportunity_backfill_runs').delete().in('id', [runId, rerunId, conflictRunId]);
     assert.ifError(runCleanup.error);
