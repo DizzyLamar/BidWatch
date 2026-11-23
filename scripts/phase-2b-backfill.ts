@@ -724,6 +724,17 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
         findingsByCode[code] = (findingsByCode[code] || 0) + 1;
       }
     }
+    const updateRowsAccountedFor = ledger.filter((row: any) => row.legacy_collection === 'opportunity_updates').length;
+    const sourceRunRowsAccountedFor = ledger.filter((row: any) => row.legacy_collection === 'opportunity_source_runs').length;
+    const changeRowsAccountedFor = ledger.filter((row: any) => row.legacy_collection === 'opportunity_changes').length;
+    const countsMatch = updateRowsAccountedFor === legacy.updates.length &&
+      sourceRunRowsAccountedFor === legacy.runs.length && changeRowsAccountedFor === legacy.changes.length;
+    const localReconciliationClean = countsMatch && quarantineRecords.length === 0;
+    const stopConditions = [
+      ...(quarantineRecords.length ? ['Resolve or explicitly accept all quarantined legacy records before treating the local reconciliation as clean.'] : []),
+      ...(!countsMatch ? ['Legacy collection counts do not exactly match checkpoint ledger counts.'] : []),
+      'Production execution remains blocked pending a sanitized production export, verified restoration rehearsal, and explicit approval.',
+    ];
     const runSummary = {
       ...summary,
       ledger: {
@@ -736,15 +747,19 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
         })),
       },
       reconciliation: {
-        updateRowsAccountedFor: ledger.filter((row: any) => row.legacy_collection === 'opportunity_updates').length,
-        sourceRunRowsAccountedFor: ledger.filter((row: any) => row.legacy_collection === 'opportunity_source_runs').length,
-        changeRowsAccountedFor: ledger.filter((row: any) => row.legacy_collection === 'opportunity_changes').length,
-        updateRowsUnaccountedFor: Math.max(0, legacy.updates.length - ledger.filter((row: any) => row.legacy_collection === 'opportunity_updates').length),
-        sourceRunRowsUnaccountedFor: Math.max(0, legacy.runs.length - ledger.filter((row: any) => row.legacy_collection === 'opportunity_source_runs').length),
-        changeRowsUnaccountedFor: Math.max(0, legacy.changes.length - ledger.filter((row: any) => row.legacy_collection === 'opportunity_changes').length),
+        updateRowsAccountedFor,
+        sourceRunRowsAccountedFor,
+        changeRowsAccountedFor,
+        updateRowsUnaccountedFor: Math.max(0, legacy.updates.length - updateRowsAccountedFor),
+        sourceRunRowsUnaccountedFor: Math.max(0, legacy.runs.length - sourceRunRowsAccountedFor),
+        changeRowsUnaccountedFor: Math.max(0, legacy.changes.length - changeRowsAccountedFor),
+        countsMatch,
         quarantinesRemain: quarantineRecords.length > 0,
+        localReconciliationClean,
+        productionReady: false,
         productionTouched: false,
       },
+      stopConditions,
     };
     const finish = await client.from('legacy_opportunity_backfill_runs').update({
       status: 'completed', completed_at: new Date().toISOString(), summary: runSummary,
