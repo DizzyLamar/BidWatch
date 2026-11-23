@@ -53,7 +53,7 @@ revoke all on table
   public.legacy_opportunity_backfill_records
 from public, anon, authenticated;
 
-grant select, insert, update on table
+grant select, insert, update, delete on table
   public.legacy_opportunity_backfill_runs,
   public.legacy_opportunity_backfill_records
 to service_role;
