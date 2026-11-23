@@ -282,7 +282,7 @@ The command prints the run ID before writing and emits a mode-0600 report at `ar
 
 Unlike the dry-run inventory, the writer can reconstruct snapshots when the full chain is provable. It starts from the current legacy update, walks sparse deltas backwards in reverse chronological order, and requires each delta's `after` values to match the state reached from the current record. It then emits full normalized snapshots for each detected transition, in chronological order, with SHA-256 hashes. Unsupported fields, missing values, invalid timestamps or inconsistent transitions are quarantined; no partial history is written for that update.
 
-This reconstruction is still only as complete as the legacy change log. It cannot recover changes that were never recorded, and it does not invent a pre-history baseline snapshot.
+The pure history-reconstruction unit tests exercise a consistent sparse chain and verify chronological full snapshots. The local integration test exercises the inconsistent-chain quarantine path. The integration fixture does not attempt to delete immutable version rows because the target table is intentionally append-only. This reconstruction is still only as complete as the legacy change log. It cannot recover changes that were never recorded, and it does not invent a pre-history baseline snapshot.
 
 ### CI and acceptance
 
@@ -291,7 +291,7 @@ CI runs the read-only dry-run and the write-path smoke test against its disposab
 - a new opportunity and an imported opportunity with a valid same-organisation tender;
 - a dismissed opportunity without a real timestamp (quarantined);
 - a global source-run mapping;
-- a consistent sparse history chain reconstructed into an immutable full snapshot;
+- a deliberately inconsistent history chain quarantined without inserting partial immutable versions;
 - preservation of legacy records;
 - deterministic observation identity and no duplicate target row on a second run;
 - ledger accounting across a new idempotency-verification run.
