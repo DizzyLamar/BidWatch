@@ -213,14 +213,24 @@ async function loadMigratedIds(client: any, collection: string): Promise<Set<str
 }
 
 async function mapSourceRegistry(client: any) {
-  const result = await client.from('procurement_sources').upsert(
-    LEGACY_SOURCES.map(source => ({
+  const map = new Map<string, string>();
+  for (const source of LEGACY_SOURCES) {
+    const existingResult = await client.from('procurement_sources')
+      .select('id,source_key,name,base_url,adapter_key').eq('source_key', source.id).maybeSingle();
+    const existing = await assertResult(existingResult, 'Could not inspect procurement source registry');
+    if (existing) {
+      if (existing.name !== source.name || existing.base_url !== source.url || existing.adapter_key !== source.id) {
+        throw new Error('Existing procurement source registry entry differs from the legacy adapter definition: ' + source.id);
+      }
+      map.set(source.id, String(existing.id));
+      continue;
+    }
+    const inserted = await client.from('procurement_sources').insert({
       source_key: source.id, name: source.name, base_url: source.url, adapter_key: source.id, status: 'active',
-    })),
-    { onConflict: 'source_key' },
-  ).select('id,source_key');
-  const rows = await assertResult(result, 'Could not upsert legacy procurement source registry');
-  const map = new Map<string, string>((rows || []).map((row: any) => [row.source_key, row.id]));
+    }).select('id').single();
+    const data = await assertResult(inserted, 'Could not create procurement source registry entry');
+    map.set(source.id, String(data.id));
+  }
   if (map.size !== LEGACY_SOURCES.length) throw new Error('Source registry did not resolve all five expected sources.');
   return map;
 }
@@ -337,15 +347,26 @@ async function ensureCanonicalLink(client: any, observationId: string, canonical
 }
 
 async function ensureLinkEvent(client: any, observationId: string, canonicalId: string, eventId: string, legacyRecordId: string) {
-  const result = await client.from('canonical_opportunity_events').upsert({
+  const payload = {
     id: eventId,
     event_type: 'source_linked',
     canonical_opportunity_id: canonicalId,
     observation_id: observationId,
     reason: 'Initial one-observation canonical seed during legacy backfill',
     details: { legacy_record_id: legacyRecordId, match_method: 'source_observation_seed' },
-  }, { onConflict: 'id' });
-  await assertResult(result, 'Could not persist canonical source-link audit event');
+  };
+  const existingResult = await client.from('canonical_opportunity_events').select('*').eq('id', eventId).maybeSingle();
+  const existing = await assertResult(existingResult, 'Could not inspect canonical source-link audit event');
+  if (existing) {
+    for (const field of ['event_type', 'canonical_opportunity_id', 'observation_id', 'reason', 'details']) {
+      if (!sameJson(existing[field], (payload as any)[field])) {
+        throw new Error('Existing canonical source-link audit event was changed; refusing to overwrite it.');
+      }
+    }
+    return;
+  }
+  const inserted = await client.from('canonical_opportunity_events').insert(payload);
+  await assertResult(inserted, 'Could not persist canonical source-link audit event');
 }
 
 async function migrateUpdate(client: any, row: LegacyRow, organisationId: string, sourceIds: Map<string, string>, tenderRows: LegacyRow[]) {
@@ -360,12 +381,25 @@ async function migrateUpdate(client: any, row: LegacyRow, organisationId: string
   }
   const observation = observationPayload(row, sourceId);
   const observationResult = await client.from('procurement_source_observations')
-    .upsert(observation, { onConflict: 'source_id,source_key' }).select('id').single();
-  const observationData = await assertResult(observationResult, 'Could not upsert source observation');
-  const observationId = String(observationData.id);
+    .select('*').eq('source_id', sourceId).eq('source_key', observation.source_key).maybeSingle();
+  const existingObservation = await assertResult(observationResult, 'Could not inspect source observation');
+  let observationId: string;
+  if (existingObservation) {
+    const fields = Object.keys(observation) as Array<keyof typeof observation>;
+    for (const field of fields) {
+      if (!sameJson(existingObservation[field as string], observation[field])) {
+        throw new Error('Existing source observation differs from the deterministic legacy mapping; refusing to overwrite it.');
+      }
+    }
+    observationId = String(existingObservation.id);
+  } else {
+    const inserted = await client.from('procurement_source_observations').insert(observation).select('id').single();
+    const data = await assertResult(inserted, 'Could not insert source observation');
+    observationId = String(data.id);
+  }
 
   const canonicalKey = 'legacy:' + row.record.sourceId + ':' + row.id;
-  const canonicalResult = await client.from('canonical_opportunities').upsert({
+  const canonicalPayload = {
     canonical_key: canonicalKey,
     title: observation.title,
     buyer_name: observation.buyer_name,
@@ -377,19 +411,45 @@ async function migrateUpdate(client: any, row: LegacyRow, organisationId: string
     procurement_method: observation.procurement_method,
     lifecycle_status: 'unknown',
     canonical_url: observation.source_url,
-  }, { onConflict: 'canonical_key' }).select('id').single();
-  const canonicalData = await assertResult(canonicalResult, 'Could not upsert canonical opportunity');
-  const canonicalId = String(canonicalData.id);
+  };
+  const canonicalResult = await client.from('canonical_opportunities').select('*')
+    .eq('canonical_key', canonicalKey).maybeSingle();
+  const existingCanonical = await assertResult(canonicalResult, 'Could not inspect canonical opportunity');
+  let canonicalId: string;
+  if (existingCanonical) {
+    for (const [field, value] of Object.entries(canonicalPayload)) {
+      if (!sameJson(existingCanonical[field], value)) {
+        throw new Error('Existing canonical opportunity differs from the deterministic legacy mapping; refusing to overwrite it.');
+      }
+    }
+    canonicalId = String(existingCanonical.id);
+  } else {
+    const inserted = await client.from('canonical_opportunities').insert(canonicalPayload).select('id').single();
+    const data = await assertResult(inserted, 'Could not insert canonical opportunity');
+    canonicalId = String(data.id);
+  }
   const linkId = await ensureCanonicalLink(client, observationId, canonicalId);
   const eventId = deterministicUuid('source-linked-event:' + observationId);
   await ensureLinkEvent(client, observationId, canonicalId, eventId, row.id);
 
-  const pursuitResult = await client.from('organisation_opportunities').upsert(
-    pursuitPayload(row, organisationId, canonicalId),
-    { onConflict: 'organisation_id,canonical_opportunity_id' },
-  ).select('id').single();
-  const pursuitData = await assertResult(pursuitResult, 'Could not upsert organisation pursuit');
-  return { observationId, canonicalId, linkId, pursuitId: String(pursuitData.id) };
+  const desiredPursuit = pursuitPayload(row, organisationId, canonicalId);
+  const existingPursuitResult = await client.from('organisation_opportunities').select('*')
+    .eq('organisation_id', organisationId).eq('canonical_opportunity_id', canonicalId).maybeSingle();
+  const existingPursuit = await assertResult(existingPursuitResult, 'Could not inspect organisation pursuit');
+  let pursuitId: string;
+  if (existingPursuit) {
+    for (const [field, value] of Object.entries(desiredPursuit)) {
+      if (!sameJson(existingPursuit[field], value)) {
+        throw new Error('Existing organisation pursuit differs from the legacy mapping; refusing to overwrite organisation workflow state.');
+      }
+    }
+    pursuitId = String(existingPursuit.id);
+  } else {
+    const inserted = await client.from('organisation_opportunities').insert(desiredPursuit).select('id').single();
+    const data = await assertResult(inserted, 'Could not insert organisation pursuit');
+    pursuitId = String(data.id);
+  }
+  return { observationId, canonicalId, linkId, pursuitId };
 }
 
 async function migrateChangesForUpdate(
@@ -539,10 +599,23 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
         const sourceId = sourceIds.get(String(row.record.sourceId));
         if (!sourceId) throw new Error('Validated source key was not present in source registry.');
         const payload = sourceRunPayload(row, sourceId);
-        const result = await client.from('procurement_source_runs').upsert(payload, { onConflict: 'id' }).select('id').single();
-        const data = await assertResult(result, 'Could not upsert source run');
+        const existingResult = await client.from('procurement_source_runs').select('*').eq('id', payload.id).maybeSingle();
+        const existing = await assertResult(existingResult, 'Could not inspect source run');
+        let targetRunId: string;
+        if (existing) {
+          for (const [field, value] of Object.entries(payload)) {
+            if (!sameJson(existing[field], value)) {
+              throw new Error('Existing source run differs from deterministic legacy mapping; refusing to overwrite it.');
+            }
+          }
+          targetRunId = String(existing.id);
+        } else {
+          const inserted = await client.from('procurement_source_runs').insert(payload).select('id').single();
+          const data = await assertResult(inserted, 'Could not insert source run');
+          targetRunId = String(data.id);
+        }
         await writeLedger(client, { collection: 'opportunity_source_runs', recordId: row.id, runId, organisationId: legacy.organisationId,
-          status: 'migrated', targetIds: { source_run_id: String(data.id) } });
+          status: 'migrated', targetIds: { source_run_id: targetRunId } });
         summary.migrated.opportunity_source_runs += 1;
       } catch (error) {
         await writeLedger(client, { collection: 'opportunity_source_runs', recordId: row.id, runId, organisationId: legacy.organisationId,
