@@ -67,7 +67,7 @@ function parseDate(value: unknown): string | null {
 }
 function strictTimestamp(value: unknown): string | null {
   if (typeof value !== 'string' ||
-      !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) return null;
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return null;
   const [year, month, day] = value.slice(0, 10).split('-').map(Number);
