@@ -1,6 +1,6 @@
 # Phase 2B: Legacy Opportunity Backfill Design
 
-**Status:** implementation staged in the Phase 2B pull request; production execution remains gated  
+**Status:** Phase 2B implementation merged; production execution remains gated  
 **Design baseline:** Phase 2A head `991ec334f9ee3cd97ebe22c29915ea2ee3e034e9`  
 **Implementation branch:** `phase-2b/dry-run-tooling`
 
@@ -61,7 +61,7 @@ Map each legacy `opportunity_source_runs` record to one target run:
 - `started_at`: derive from valid `checkedAt - durationMs` only when both values are valid and duration is non-negative. Record the derivation in metadata. If not derivable, use a documented fallback only after implementation review; do not pretend the legacy timestamp was an observed start time.
 - counts: preserve `fetchedCount`, `parsedCount`, `relevantCount`, and `failedCount` after integer/non-negative validation.
 - `safe_message`: retain the legacy message only after confirming it contains no credentials, personal data or raw upstream response.
-- `metadata`: retain `accessMethod`, `durationMs`, `legacy_record_id`, and any other explicitly allow-listed operational fields.
+- `metadata`: retain `accessMethod` only when it is exactly `public-page` or `public-ocds-api`; retain `durationMs` and `legacy_record_id`. Unknown access methods are quarantined and never copied. Do not copy arbitrary operational strings.
 
 Do not copy the embedded notice collection into a run's metadata. Notices are migrated as observations. A legacy run that references an unknown source key or has invalid counts/timestamps goes to the quarantine report.
 
@@ -159,11 +159,11 @@ The backfill must have a dry-run mode that performs no writes and emits a machin
 
 Idempotency requirements:
 - use deterministic source keys and canonical keys;
-- use upserts constrained by target unique keys;
+- use deterministic target keys and insert-or-verify against unique constraints; never overwrite existing target state;
 - never create a second observation for the same `(source_id, source_key)`;
 - never append duplicate versions for the same observation/hash;
 - store a migration-run identifier and per-stage checkpoints;
-- commit bounded batches and persist progress so a process can resume safely;
+- process explicit bounded record-ID batches and persist per-record checkpoints so a process can resume safely;
 - do not overwrite a target row that has changed since a previous backfill run without an explicit reconciliation rule.
 
 The dry-run report must be reviewed before write mode is enabled. The write mode must support a no-op rerun and produce the same reconciliation totals.
