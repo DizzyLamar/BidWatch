@@ -169,8 +169,8 @@ export function buildPhase2BDryRunReport(input: {
     if (run.durationMs != null && (!Number.isFinite(Number(run.durationMs)) || Number(run.durationMs) < 0)) {
       addFinding(findings, row, 'invalid_duration', 'durationMs must be a non-negative number.');
     }
-    if (run.durationMs != null && validTimestamp(run.checkedAt) &&
-        !Number.isFinite(new Date(Date.parse(String(run.checkedAt)) - Number(run.durationMs)).getTime())) {
+    if (run.durationMs != null && Number.isFinite(Number(run.durationMs)) && Number(run.durationMs) >= 0 &&
+        validTimestamp(run.checkedAt) && !Number.isFinite(new Date(Date.parse(String(run.checkedAt)) - Number(run.durationMs)).getTime())) {
       addFinding(findings, row, 'invalid_duration', 'durationMs cannot produce a valid started_at timestamp.');
     }
   }
