@@ -554,6 +554,9 @@ async function migrateChangesForUpdate(
 
 
 export async function runPhase2BBackfill(client: any, options: { runId?: string; generatedAt?: string } = {}) {
+  const clientUrl = typeof client?.supabaseUrl === 'string' ? client.supabaseUrl : '';
+  if (!clientUrl) throw new Error('Backfill requires a Supabase client with an inspectable endpoint.');
+  parseLocalSupabaseUrl(clientUrl);
   const legacy = await loadLegacy(client);
   const allRows = [...legacy.updates, ...legacy.changes, ...legacy.runs, ...legacy.tenders];
   const dryRun = buildPhase2BDryRunReport({ organisationId: legacy.organisationId, rows: allRows, generatedAt: options.generatedAt });
