@@ -565,6 +565,67 @@ async function migrateChangesForUpdate(
 }
 
 
+async function verifyLedgerTargets(client: any, ledgerRows: any[]) {
+  const requirements: Record<string, Array<{ collection: string; key: string }>> = {
+    procurement_source_observations: [{ collection: 'opportunity_updates', key: 'observation_id' }],
+    canonical_opportunities: [{ collection: 'opportunity_updates', key: 'canonical_opportunity_id' }],
+    canonical_opportunity_sources: [{ collection: 'opportunity_updates', key: 'canonical_source_link_id' }],
+    organisation_opportunities: [{ collection: 'opportunity_updates', key: 'organisation_opportunity_id' }],
+    procurement_source_runs: [{ collection: 'opportunity_source_runs', key: 'source_run_id' }],
+    procurement_observation_versions: [{ collection: 'opportunity_changes', key: 'version_id' }],
+  };
+  const idsByTable = new Map<string, Set<string>>();
+  for (const row of ledgerRows.filter(item => item.status === 'migrated')) {
+    for (const [table, mappings] of Object.entries(requirements)) {
+      for (const mapping of mappings) {
+        if (row.legacy_collection !== mapping.collection) continue;
+        const id = row.target_ids?.[mapping.key];
+        if (typeof id === 'string' && UUID.test(id)) {
+          const ids = idsByTable.get(table) || new Set<string>();
+          ids.add(id);
+          idsByTable.set(table, ids);
+        }
+      }
+    }
+  }
+  const presentByTable = new Map<string, Set<string>>();
+  for (const [table, ids] of idsByTable) {
+    const present = new Set<string>();
+    const values = [...ids];
+    for (let offset = 0; offset < values.length; offset += 100) {
+      const result = await client.from(table).select('id').in('id', values.slice(offset, offset + 100));
+      const rows = await assertResult(result, 'Could not verify migrated target rows in ' + table);
+      for (const row of rows || []) present.add(String(row.id));
+    }
+    presentByTable.set(table, present);
+  }
+
+  const missing: Array<{ collection: string; recordId: string; target: string }> = [];
+  for (const row of ledgerRows.filter(item => item.status === 'migrated')) {
+    const required = row.legacy_collection === 'opportunity_updates'
+      ? ['observation_id', 'canonical_opportunity_id', 'canonical_source_link_id', 'organisation_opportunity_id']
+      : row.legacy_collection === 'opportunity_source_runs'
+        ? ['source_run_id']
+        : ['observation_id', 'version_id'];
+    const tableForKey: Record<string, string> = {
+      observation_id: 'procurement_source_observations',
+      canonical_opportunity_id: 'canonical_opportunities',
+      canonical_source_link_id: 'canonical_opportunity_sources',
+      organisation_opportunity_id: 'organisation_opportunities',
+      source_run_id: 'procurement_source_runs',
+      version_id: 'procurement_observation_versions',
+    };
+    for (const key of required) {
+      const id = row.target_ids?.[key];
+      const table = tableForKey[key];
+      if (typeof id !== 'string' || !UUID.test(id) || !presentByTable.get(table)?.has(id)) {
+        missing.push({ collection: row.legacy_collection, recordId: String(row.legacy_record_id), target: key });
+      }
+    }
+  }
+  return missing;
+}
+
 export async function runPhase2BBackfill(client: any, options: { runId?: string; generatedAt?: string } = {}) {
   const clientUrl = typeof client?.supabaseUrl === 'string' ? client.supabaseUrl : '';
   if (!clientUrl) throw new Error('Backfill requires a Supabase client with an inspectable endpoint.');
@@ -712,6 +773,7 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
     const ledgerCounts = await client.from('legacy_opportunity_backfill_records')
       .select('legacy_collection,status,legacy_record_id,findings').eq('organisation_id', legacy.organisationId);
     const ledger = await assertResult(ledgerCounts, 'Could not reconcile run ledger') || [];
+    const missingTargetReferences = await verifyLedgerTargets(client, ledger);
     const ledgerByCollection = Object.fromEntries(['opportunity_updates', 'opportunity_changes', 'opportunity_source_runs'].map(collection => [
       collection,
       countByStatus(ledger.filter((row: any) => row.legacy_collection === collection)),
@@ -729,10 +791,11 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
     const changeRowsAccountedFor = ledger.filter((row: any) => row.legacy_collection === 'opportunity_changes').length;
     const countsMatch = updateRowsAccountedFor === legacy.updates.length &&
       sourceRunRowsAccountedFor === legacy.runs.length && changeRowsAccountedFor === legacy.changes.length;
-    const localReconciliationClean = countsMatch && quarantineRecords.length === 0;
+    const localReconciliationClean = countsMatch && quarantineRecords.length === 0 && missingTargetReferences.length === 0;
     const stopConditions = [
       ...(quarantineRecords.length ? ['Resolve or explicitly accept all quarantined legacy records before treating the local reconciliation as clean.'] : []),
       ...(!countsMatch ? ['Legacy collection counts do not exactly match checkpoint ledger counts.'] : []),
+      ...(missingTargetReferences.length ? ['One or more migrated ledger entries reference missing target rows.'] : []),
       'Production execution remains blocked pending a sanitized production export, verified restoration rehearsal, and explicit approval.',
     ];
     const runSummary = {
@@ -755,6 +818,8 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
         changeRowsUnaccountedFor: Math.max(0, legacy.changes.length - changeRowsAccountedFor),
         countsMatch,
         quarantinesRemain: quarantineRecords.length > 0,
+        missingTargetReferences,
+        targetRecordsPresent: missingTargetReferences.length === 0,
         localReconciliationClean,
         productionReady: false,
         productionTouched: false,
