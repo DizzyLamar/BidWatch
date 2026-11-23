@@ -833,11 +833,13 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
     const changeRowsAccountedFor = ledger.filter((row: any) => row.legacy_collection === 'opportunity_changes').length;
     const countsMatch = updateRowsAccountedFor === legacy.updates.length &&
       sourceRunRowsAccountedFor === legacy.runs.length && changeRowsAccountedFor === legacy.changes.length;
-    const localReconciliationClean = countsMatch && quarantineRecords.length === 0 && missingTargetReferences.length === 0;
+    const selectionResolved = selection.unresolvedRecordIds.length === 0;
+    const localReconciliationClean = countsMatch && quarantineRecords.length === 0 && missingTargetReferences.length === 0 && selectionResolved;
     const stopConditions = [
       ...(quarantineRecords.length ? ['Resolve or explicitly accept all quarantined legacy records before treating the local reconciliation as clean.'] : []),
       ...(!countsMatch ? ['Legacy collection counts do not exactly match checkpoint ledger counts.'] : []),
       ...(missingTargetReferences.length ? ['One or more migrated ledger entries reference missing target rows.'] : []),
+      ...(!selectionResolved ? ['One or more requested legacy record IDs were not found in the legacy workspace.'] : []),
       'Production execution remains blocked pending a sanitized production export, verified restoration rehearsal, and explicit approval.',
     ];
     const runSummary = {
@@ -861,6 +863,7 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
         countsMatch,
         quarantinesRemain: quarantineRecords.length > 0,
         missingTargetReferences,
+        selectionResolved,
         targetRecordsPresent: missingTargetReferences.length === 0,
         localReconciliationClean,
         productionReady: false,
