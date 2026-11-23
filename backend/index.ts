@@ -5,6 +5,8 @@ import { storageService } from './storage';
 import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES } from './opportunity-discovery';
 import { verifyOpportunity } from './opportunity-verification';
 import { runOrganisationTasks } from './scheduled-jobs';
+import { procurementReadRepository } from './procurement-repository';
+import { buildOpportunityShadowComparison } from './opportunity-shadow';
 
 const now = () => new Date().toISOString();
 
@@ -466,6 +468,26 @@ export const handler = router({
   'PUT /api/me/onboarding': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
   'GET /api/config': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => { await ensureDefaultCategories(); const records = await listAll<{ name: string; active: boolean }>('categories'); return json({ categories: records.filter(x => x.active).map(x => x.name), categoryRecords: records, statuses: STATUSES }); }],
   'GET /api/opportunities/sources': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => json({ sources: DISCOVERY_SOURCES })],
+  'GET /api/opportunities/shadow-compare': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => {
+    let localDatabase = false;
+    try {
+      const host = new URL(process.env.SUPABASE_URL || '').hostname;
+      localDatabase = ['localhost', '127.0.0.1', '::1'].includes(host);
+    } catch { /* A missing or invalid URL must keep shadow reads disabled. */ }
+    if (process.env.PHASE2C_SHADOW_COMPARE !== '1' || !localDatabase) {
+      return json({ enabled: false, mode: 'disabled', reason: 'Shadow comparison is available only when explicitly enabled against a local Supabase database.' });
+    }
+    const [legacy, canonical] = await Promise.all([
+      listOpportunityUpdates(100),
+      procurementReadRepository.listOrganisationOpportunitiesPage({ limit: 100 }),
+    ]);
+    const comparison = buildOpportunityShadowComparison(
+      legacy.map(item => ({ id: item.id, sourceId: item.sourceId, state: item.state })),
+      canonical.items.map(item => ({ canonical_key: item.canonical_opportunities.canonical_key, state: item.state })),
+      legacy.length < 100 && canonical.nextCursor === null,
+    );
+    return json({ enabled: true, mode: 'shadow-only', comparison });
+  }],
   'GET /api/opportunities/updates': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => { const updates = await listOpportunityUpdates(60); return json({ updates, meta: { build: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'unknown', count: updates.length, supabaseHost: process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).host : 'not-configured' } }); }],
   'GET /api/opportunities/watchlists': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async ctx => { const u = await actor(ctx); const items = await listAll<Record<string, unknown>>('opportunity_watchlists'); return json({ watchlists: items.filter(x => x.userId === u.id).sort((a,b) => String(a.name).localeCompare(String(b.name))) }); }],
   'POST /api/opportunities/watchlists': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('Watchlist name is required.', 400); const filters = b.filters && typeof b.filters === 'object' ? b.filters : {}; const [id] = await db.add('opportunity_watchlists', [{ userId: u.id, name, filters, createdAt: now(), updatedAt: now() }]); if (!id) return error('Could not save watchlist.', 500); return json({ watchlist: await getById<Record<string, unknown>>('opportunity_watchlists', id) }, 201); }],
