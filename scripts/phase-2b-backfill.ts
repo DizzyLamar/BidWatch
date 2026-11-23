@@ -65,6 +65,18 @@ function parseDate(value: unknown): string | null {
   const time = Date.parse(value);
   return Number.isFinite(time) ? new Date(time).toISOString() : null;
 }
+function strictTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' ||
+      !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) return null;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return null;
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  const [hour, minute, second] = value.slice(11, 19).split(':').map(Number);
+  const calendar = new Date(Date.UTC(year, month - 1, day));
+  if (calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 ||
+      calendar.getUTCDate() !== day || hour > 23 || minute > 59 || second > 59) return null;
+  return new Date(time).toISOString();
+}
 function asText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -110,7 +122,7 @@ export function reconstructHistorySnapshots(
 
   for (const changeRow of [...ordered].reverse()) {
     const change = changeRow.record;
-    const detectedAt = parseDate(change.detectedAt);
+    const detectedAt = strictTimestamp(change.detectedAt);
     if (!detectedAt) return { ok: false, reason: 'Change has no valid detectedAt timestamp.' };
     if (!Array.isArray(change.changedFields) || !change.changedFields.length ||
         !change.changedFields.every((field): field is string => typeof field === 'string' && HISTORY_FIELDS.has(field))) {
