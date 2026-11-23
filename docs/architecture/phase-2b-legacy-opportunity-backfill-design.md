@@ -273,11 +273,11 @@ The command prints the run ID before writing and emits a mode-0600 report at `ar
 
 ### Write and recovery semantics
 
-- Source registry entries are upserted by their stable source key.
-- Each observation uses `legacy-app-record:<app_records.id>` as its stable source key and is upserted by `(source_id, source_key)`.
-- Each canonical seed uses a deterministic key derived from source key and legacy update ID.
-- Each pursuit is upserted by `(organisation_id, canonical_opportunity_id)`.
-- Source runs and audit events use deterministic UUIDs.
+- Source registry entries are inserted by stable source key when absent; existing entries must match the adapter definition and are never reset or overwritten.
+- Each observation uses `legacy-app-record:<app_records.id>` as its stable source key. Existing observations are reused only when every mapped field matches; conflicting rows are quarantined rather than overwritten.
+- Each canonical seed uses a deterministic key derived from source key and legacy update ID; existing canonical fields must match exactly.
+- Each pursuit is identified by `(organisation_id, canonical_opportunity_id)`. Existing workflow state is preserved; a mismatch is quarantined rather than overwritten.
+- Source runs and audit events use deterministic UUIDs and are inserted once, then verified on retry.
 - A per-record checkpoint is persisted only after its target writes complete. If the process stops midway through a record, deterministic IDs and natural-key upserts allow that record to be retried.
 - Only one active run per organisation is allowed. A crashed run remains active and must be resumed with its recorded run ID; do not start a competing run.
 - Legacy `app_records` rows are read-only and are never updated or deleted.
