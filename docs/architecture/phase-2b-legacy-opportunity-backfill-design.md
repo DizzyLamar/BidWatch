@@ -1,6 +1,6 @@
 # Phase 2B: Legacy Opportunity Backfill Design
 
-**Status:** design only; no migration or backfill implemented  
+**Status:** implementation staged in the Phase 2B pull request; production execution remains gated  
 **Design baseline:** Phase 2A head `991ec334f9ee3cd97ebe22c29915ea2ee3e034e9`  
 **Implementation branch:** `phase-2b/dry-run-tooling`
 
@@ -229,3 +229,71 @@ The read-only inventory report retains every row-level finding, not just a cappe
 ### Bounded imported-tender validation
 
 Imported tender UUIDs are resolved in batches of at most 100 IDs per PostgREST request. Result pagination alone does not bound the URL/filter size of a single `.in(...)` request. The integration test treats global source-run counts as a lower bound because other integration suites may create independent global runs concurrently.
+
+
+## 10. Resumable local backfill implementation
+
+The implementation adds two additive schema migrations:
+
+- `20261119070000_phase2b_source_observation_seed_method.sql` allows the explicit `source_observation_seed` provenance method without changing existing match values.
+- `20261119071000_phase2b_backfill_checkpoints.sql` adds backend-only run and per-record checkpoint tables. The ledger stores legacy IDs, target IDs, status and sanitized findings; it does not copy raw legacy payloads.
+
+The writer is `scripts/phase-2b-backfill.ts`. It is permanently restricted to loopback Supabase URLs and requires all of:
+
+- `PHASE2B_BACKFILL=1`
+- `LOCAL_SUPABASE_URL`
+- `LOCAL_SUPABASE_SERVICE_ROLE_KEY`
+
+It does not fall back to application or hosted Supabase environment variables.
+
+Run locally after starting Supabase and applying migrations:
+
+```bash
+npx supabase start
+eval "$(npx supabase status -o env)"
+
+export LOCAL_SUPABASE_URL="$API_URL"
+export LOCAL_SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+export PHASE2B_BACKFILL=1
+
+# Use an explicit UUID so an interrupted run can be resumed.
+export PHASE2B_RUN_ID="$(node -e "console.log(crypto.randomUUID())")"
+npm run phase2b:backfill
+```
+
+The command prints the run ID before writing and emits a mode-0600 report at `artifacts/phase-2b-backfill-report.json` by default. If interrupted, rerun with the same `PHASE2B_RUN_ID`. A completed run cannot be resumed; use a new UUID for an idempotency verification pass.
+
+### Write and recovery semantics
+
+- Source registry entries are upserted by their stable source key.
+- Each observation uses `legacy-app-record:<app_records.id>` as its stable source key and is upserted by `(source_id, source_key)`.
+- Each canonical seed uses a deterministic key derived from source key and legacy update ID.
+- Each pursuit is upserted by `(organisation_id, canonical_opportunity_id)`.
+- Source runs and audit events use deterministic UUIDs.
+- A per-record checkpoint is persisted only after its target writes complete. If the process stops midway through a record, deterministic IDs and natural-key upserts allow that record to be retried.
+- Only one active run per organisation is allowed. A crashed run remains active and must be resumed with its recorded run ID; do not start a competing run.
+- Legacy `app_records` rows are read-only and are never updated or deleted.
+- Imported rows become `converted` only after the same-organisation tender is revalidated immediately before writing.
+- Dismissed rows without a real legacy `dismissedAt` remain quarantined.
+- Raw scraped text and source-run messages are not copied into the new schema.
+- A failed or inconsistent history chain is quarantined as a group before any versions for that parent are inserted.
+
+### Historical reconstruction
+
+Unlike the dry-run inventory, the writer can reconstruct snapshots when the full chain is provable. It starts from the current legacy update, walks sparse deltas backwards in reverse chronological order, and requires each delta's `after` values to match the state reached from the current record. It then emits full normalized snapshots for each detected transition, in chronological order, with SHA-256 hashes. Unsupported fields, missing values, invalid timestamps or inconsistent transitions are quarantined; no partial history is written for that update.
+
+This reconstruction is still only as complete as the legacy change log. It cannot recover changes that were never recorded, and it does not invent a pre-history baseline snapshot.
+
+### CI and acceptance
+
+CI runs the read-only dry-run and the write-path smoke test against its disposable local Supabase database, then runs the full integration suite. Integration coverage exercises:
+
+- a new opportunity and an imported opportunity with a valid same-organisation tender;
+- a dismissed opportunity without a real timestamp (quarantined);
+- a global source-run mapping;
+- a consistent sparse history chain reconstructed into an immutable full snapshot;
+- preservation of legacy records;
+- deterministic observation identity and no duplicate target row on a second run;
+- ledger accounting across a new idempotency-verification run.
+
+A successful local synthetic run validates the engine and schema contract. It does not prove that the user's historical production data contains no additional anomalies. A sanitized export is still required for source-by-source reconciliation and a production runbook. No hosted schema migration, production backfill, application cutover, Storage change or deployment is part of this implementation.
