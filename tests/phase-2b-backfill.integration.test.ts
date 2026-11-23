@@ -116,6 +116,11 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.ifError(link.error);
     assert.equal(link.data.match_method, 'source_observation_seed');
 
+    const noVersions = await admin.from('procurement_observation_versions').select('id', { count: 'exact', head: true })
+      .eq('observation_id', observationId);
+    assert.ifError(noVersions.error);
+    assert.equal(noVersions.count, 0, 'An inconsistent history chain must not create partial immutable versions.');
+
     const pursuit = await admin.from('organisation_opportunities').select('state,converted_tender_id')
       .eq('organisation_id', organisationId).eq('canonical_opportunity_id', canonical.data.id).single();
     assert.ifError(pursuit.error);
@@ -133,7 +138,8 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     const second = await runPhase2BBackfill(admin, { runId: rerunId, generatedAt: timestamp });
     assert.equal(second.migrated.opportunity_updates, 0);
     assert.equal(second.skippedPreviouslyMigrated.opportunity_updates, 2);
-    assert.equal(second.skippedPreviouslyMigrated.opportunity_changes, 1);
+    assert.equal(second.skippedPreviouslyMigrated.opportunity_changes, 0);
+    assert.equal(second.quarantined.opportunity_changes, 1);
     assert.equal(second.skippedPreviouslyMigrated.opportunity_source_runs, 1);
     assert.equal(second.reconciliation.updateRowsAccountedFor, 3);
 
