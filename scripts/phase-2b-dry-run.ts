@@ -368,6 +368,7 @@ async function main() {
   const outputPath = resolve(process.env.PHASE2B_REPORT_PATH || 'artifacts/phase-2b-dry-run.json');
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(report, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+  await chmod(outputPath, 0o600);
   process.stdout.write(JSON.stringify({
     reportPath: outputPath,
     mode: report.mode,
