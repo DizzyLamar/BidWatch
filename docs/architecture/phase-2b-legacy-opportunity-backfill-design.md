@@ -53,7 +53,7 @@ No additional source (institutional pages, World Bank, UNGM or other aggregators
 ### 3.2 Legacy source runs → `procurement_source_runs`
 
 Map each legacy `opportunity_source_runs` record to one target run:
-- `id`: preserve the legacy UUID when valid and unused; otherwise allocate a UUID and retain the legacy ID in metadata.
+- `id`: derive a deterministic target UUID from the legacy collection and `app_records.id`; retain the original legacy ID in metadata. This avoids collision with unrelated target runs while remaining stable across retries.
 - `source_id`: resolve through the exact legacy `sourceId` key.
 - `scan_type`: map `scheduled` / `manual`; quarantine unknown values rather than silently coercing them.
 - `status`: map `ok`, `error`, and `authentication_required` directly. Any future or unknown status requires an explicit mapping.
