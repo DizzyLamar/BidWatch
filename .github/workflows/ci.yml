@@ -85,6 +85,11 @@ jobs:
           export PHASE2B_REPORT_PATH="artifacts/phase-2b-ci-dry-run.json"
           npm run phase2b:dry-run
           test -s "$PHASE2B_REPORT_PATH"
+          export PHASE2B_BACKFILL=1
+          export PHASE2B_RUN_ID="00000000-0000-4000-8000-000000000002"
+          export PHASE2B_BACKFILL_REPORT_PATH="artifacts/phase-2b-ci-backfill.json"
+          npm run phase2b:backfill
+          test -s "$PHASE2B_BACKFILL_REPORT_PATH"
           npm run test:integration
           npx tsx scripts/migrate-legacy-attachments.ts
           npm install --no-save --package-lock=false playwright
