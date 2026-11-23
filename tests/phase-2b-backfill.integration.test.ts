@@ -179,9 +179,11 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     const sourceRunLedger = await admin.from('legacy_opportunity_backfill_records').select('target_ids')
       .eq('legacy_collection', 'opportunity_source_runs').eq('legacy_record_id', sourceRunId).maybeSingle();
     const targetRunId = sourceRunLedger.data?.target_ids?.source_run_id;
-    await admin.from('legacy_opportunity_backfill_records').delete().in('legacy_record_id',
+    const ledgerCleanup = await admin.from('legacy_opportunity_backfill_records').delete().in('legacy_record_id',
       [updateId, importedUpdateId, dismissedUpdateId, sourceRunId, changeId]);
-    await admin.from('legacy_opportunity_backfill_runs').delete().in('id', [runId, rerunId, conflictRunId]);
+    assert.ifError(ledgerCleanup.error);
+    const runCleanup = await admin.from('legacy_opportunity_backfill_runs').delete().in('id', [runId, rerunId, conflictRunId]);
+    assert.ifError(runCleanup.error);
     const observationIds = [observationId, importedObservationId];
     await admin.from('canonical_opportunity_events').delete().in('observation_id', observationIds);
     await admin.from('canonical_opportunity_sources').delete().in('observation_id', observationIds);
