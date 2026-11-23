@@ -215,7 +215,7 @@ export function buildPhase2BDryRunReport(input: {
     'imported_tender_scope_mismatch', 'imported_tender_invalid',
   ]);
   const blockedUpdateIds = new Set(findings.filter(f => f.collection === 'opportunity_updates' && blockingCodes.has(f.code)).map(f => f.recordId));
-  const runBlocking = new Set(['invalid_record_shape', 'run_scope_mismatch', 'unknown_run_source', 'unknown_run_status', 'unknown_scan_type',
+  const runBlocking = new Set(['invalid_record_shape', 'run_scope_mismatch', 'unknown_run_source', 'unknown_run_status', 'unknown_scan_type', 'invalid_access_method',
     'invalid_fetchedCount', 'invalid_parsedCount', 'invalid_relevantCount', 'invalid_failedCount', 'invalid_checked_at', 'invalid_duration']);
   const blockedRunIds = new Set(findings.filter(f => f.collection === 'opportunity_source_runs' && runBlocking.has(f.code)).map(f => f.recordId));
 
