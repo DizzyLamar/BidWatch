@@ -263,11 +263,13 @@ function observationPayload(row: LegacyRow, sourceId: string) {
   const sourceStatus = item.sourceStatus === 'active' ? 'active'
     : item.sourceStatus === 'not-seen' ? 'not_seen'
       : item.sourceStatus === 'withdrawn' ? 'withdrawn' : 'unknown';
+  const sourceDefinition = LEGACY_SOURCES.find(source => source.id === item.sourceId);
+  if (!sourceDefinition) throw new Error('Legacy source registry definition is missing.');
   const rawPayload = {
     legacy_record_id: row.id,
     legacy_source_key: item.sourceId,
-    source_name: asText(item.source),
-    source_listing_url: asText(item.sourceUrl),
+    source_name: sourceDefinition.name,
+    source_listing_url: sourceDefinition.url,
   };
   const sourceKey = 'legacy-app-record:' + row.id;
   return {
@@ -351,8 +353,9 @@ async function migrateUpdate(client: any, row: LegacyRow, organisationId: string
   if (!sourceId) throw new Error('Validated source key was not present in source registry.');
   if (row.record.state === 'imported') {
     const tender = tenderRows.find(candidate => candidate.id.toLowerCase() === String(row.record.importedTenderId).toLowerCase());
-    if (!tender || tender.scope_type !== 'organisation' || tender.organisation_id !== organisationId) {
-      throw new Error('Imported tender ownership changed after validation; refusing conversion mapping.');
+    if (!tender || tender.scope_type !== 'organisation' || tender.organisation_id !== organisationId ||
+        !isObject(tender.record) || !asText(tender.record.title)) {
+      throw new Error('Imported tender ownership or structure changed after validation; refusing conversion mapping.');
     }
   }
   const observation = observationPayload(row, sourceId);
