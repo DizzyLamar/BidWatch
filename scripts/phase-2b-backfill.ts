@@ -567,7 +567,10 @@ async function migrateChangesForUpdate(
 
 async function verifyLedgerTargets(client: any, ledgerRows: any[]) {
   const requirements: Record<string, Array<{ collection: string; key: string }>> = {
-    procurement_source_observations: [{ collection: 'opportunity_updates', key: 'observation_id' }],
+    procurement_source_observations: [
+      { collection: 'opportunity_updates', key: 'observation_id' },
+      { collection: 'opportunity_changes', key: 'observation_id' },
+    ],
     canonical_opportunities: [{ collection: 'opportunity_updates', key: 'canonical_opportunity_id' }],
     canonical_opportunity_sources: [{ collection: 'opportunity_updates', key: 'canonical_source_link_id' }],
     organisation_opportunities: [{ collection: 'opportunity_updates', key: 'organisation_opportunity_id' }],
@@ -771,7 +774,7 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
     }
 
     const ledgerCounts = await client.from('legacy_opportunity_backfill_records')
-      .select('legacy_collection,status,legacy_record_id,findings').eq('organisation_id', legacy.organisationId);
+      .select('legacy_collection,status,legacy_record_id,target_ids,findings').eq('organisation_id', legacy.organisationId);
     const ledger = await assertResult(ledgerCounts, 'Could not reconcile run ledger') || [];
     const missingTargetReferences = await verifyLedgerTargets(client, ledger);
     const ledgerByCollection = Object.fromEntries(['opportunity_updates', 'opportunity_changes', 'opportunity_source_runs'].map(collection => [
