@@ -749,6 +749,9 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
 
 async function main() {
   if (process.env.PHASE2B_BACKFILL !== '1') throw new Error('Refusing to run: set PHASE2B_BACKFILL=1 explicitly.');
+  if (process.env.PHASE2B_BACKFILL_CONFIRM !== 'REVIEWED_LOCAL_DRY_RUN') {
+    throw new Error('Refusing to write: set PHASE2B_BACKFILL_CONFIRM=REVIEWED_LOCAL_DRY_RUN only after reviewing the local dry-run report.');
+  }
   const urlValue = process.env.LOCAL_SUPABASE_URL || '';
   const key = process.env.LOCAL_SUPABASE_SERVICE_ROLE_KEY || '';
   if (!urlValue || !key) throw new Error('Set LOCAL_SUPABASE_URL and LOCAL_SUPABASE_SERVICE_ROLE_KEY for the local Supabase stack.');
