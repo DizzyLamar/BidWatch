@@ -348,7 +348,7 @@ async function ensureCanonicalLink(client: any, observationId: string, canonical
     canonical_opportunity_id: canonicalId,
     observation_id: observationId,
     match_method: 'source_observation_seed',
-    match_confidence: 1,
+    match_confidence: null,
     review_status: 'automatic',
   }).select('id').single();
   const data = await assertResult(inserted, 'Could not create canonical source link');
@@ -515,14 +515,14 @@ async function migrateChangesForUpdate(
   const existingResult = await client.from('procurement_observation_versions')
     .select('id,version_no,content_hash').eq('observation_id', observationId);
   const existing = await assertResult(existingResult, 'Could not inspect existing observation versions') || [];
-  const existingHashes = new Set(existing.map((row: any) => String(row.content_hash)));
+  const existingVersionIds = new Map<string, string>(existing.map((row: any) => [String(row.content_hash), String(row.id)]));
   let nextVersion = existing.reduce((max: number, row: any) => Math.max(max, Number(row.version_no) || 0), 0) + 1;
   let insertedCount = 0;
   const idsByChange = new Map<string, string>();
 
   for (const snapshot of reconstructed.snapshots) {
-    let versionId = existing.find((row: any) => String(row.content_hash) === snapshot.hash)?.id;
-    if (!versionId && !existingHashes.has(snapshot.hash)) {
+    let versionId = existingVersionIds.get(snapshot.hash);
+    if (!versionId) {
       versionId = deterministicUuid('observation-version:' + observationId + ':' + snapshot.hash);
       const insert = await client.from('procurement_observation_versions').insert({
         id: versionId,
@@ -535,7 +535,7 @@ async function migrateChangesForUpdate(
       }).select('id').single();
       const data = await assertResult(insert, 'Could not append immutable observation version');
       versionId = data.id;
-      existingHashes.add(snapshot.hash);
+      existingVersionIds.set(snapshot.hash, String(versionId));
       nextVersion += 1;
       insertedCount += 1;
     }
