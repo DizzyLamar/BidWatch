@@ -90,7 +90,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     const before = await admin.from('app_records').select('id,record,updated_at').in('id', fixtureRows.map(row => row.id)).order('id');
     assert.ifError(before.error);
 
-    const first = await runPhase2BBackfill(admin, { runId, generatedAt: timestamp });
+    const first = await runPhase2BBackfill(admin, { runId, generatedAt: timestamp, recordIds: fixtureRows.map(row => row.id) });
     assert.equal(first.migrated.opportunity_updates, 2);
     assert.equal(first.quarantined.opportunity_updates, 1);
     assert.equal(first.migrated.opportunity_source_runs, 1);
@@ -136,7 +136,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.equal(importedPursuit.data.state, 'converted');
     assert.equal(importedPursuit.data.converted_tender_id, tenderId);
 
-    const second = await runPhase2BBackfill(admin, { runId: rerunId, generatedAt: timestamp });
+    const second = await runPhase2BBackfill(admin, { runId: rerunId, generatedAt: timestamp, recordIds: fixtureRows.map(row => row.id) });
     assert.equal(second.migrated.opportunity_updates, 0);
     assert.equal(second.skippedPreviouslyMigrated.opportunity_updates, 2);
     assert.equal(second.skippedPreviouslyMigrated.opportunity_changes, 0);
@@ -154,7 +154,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
       .eq('legacy_collection', 'opportunity_updates').eq('legacy_record_id', updateId);
     assert.ifError(removeCheckpoint.error);
 
-    await runPhase2BBackfill(admin, { runId: conflictRunId, generatedAt: timestamp });
+    await runPhase2BBackfill(admin, { runId: conflictRunId, generatedAt: timestamp, recordIds: fixtureRows.map(row => row.id) });
     const preservedPursuit = await admin.from('organisation_opportunities').select('state')
       .eq('organisation_id', organisationId).eq('canonical_opportunity_id', canonical.data.id).single();
     assert.ifError(preservedPursuit.error);
