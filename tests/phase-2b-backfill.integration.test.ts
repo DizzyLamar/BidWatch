@@ -122,7 +122,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.ifError(noVersions.error);
     assert.equal(noVersions.count, 0, 'An inconsistent history chain must not create partial immutable versions.');
 
-    const pursuit = await admin.from('organisation_opportunities').select('state,converted_tender_id')
+    const pursuit = await admin.from('organisation_opportunities').select('id,state,converted_tender_id')
       .eq('organisation_id', organisationId).eq('canonical_opportunity_id', canonical.data.id).single();
     assert.ifError(pursuit.error);
     assert.equal(pursuit.data.state, 'new');
