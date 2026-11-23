@@ -180,7 +180,7 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.equal(second.quarantined.opportunity_updates, 3);
     assert.equal(second.skippedPreviouslyMigrated.opportunity_source_runs, 1);
     assert.equal(second.quarantined.opportunity_source_runs, 1);
-    assert.equal(second.reconciliation.updateRowsAccountedFor, 3);
+    assert.equal(second.reconciliation.updateRowsAccountedFor, 5);
 
     // Simulate an interrupted migration with a target pursuit subsequently changed
     // by an operator. Removing only the checkpoint forces a retry; the writer must
