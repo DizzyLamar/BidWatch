@@ -1,15 +1,32 @@
 {
   "compilerOptions": {
     "target": "ES2021",
-    "lib": ["ES2021", "DOM"],
+    "lib": [
+      "ES2021",
+      "DOM"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["backend", "server.ts", "src/platform.ts", "tests", "scripts/migrate-legacy-attachments.ts"],
-  "exclude": ["backend/realtime.ts", "backend/realtime-subscribers.ts", "tests/browser-tenant-isolation.test.ts"]
+  "include": [
+    "backend",
+    "server.ts",
+    "src/platform.ts",
+    "tests",
+    "scripts/migrate-legacy-attachments.ts",
+    "scripts/phase-2b-dry-run.ts",
+    "scripts/phase-2b-backfill.ts"
+  ],
+  "exclude": [
+    "backend/realtime.ts",
+    "backend/realtime-subscribers.ts",
+    "tests/browser-tenant-isolation.test.ts"
+  ]
 }
