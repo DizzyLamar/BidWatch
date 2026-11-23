@@ -244,7 +244,7 @@ The writer is `scripts/phase-2b-backfill.ts`. It is permanently restricted to lo
 - `LOCAL_SUPABASE_URL`
 - `LOCAL_SUPABASE_SERVICE_ROLE_KEY`
 
-It does not fall back to application or hosted Supabase environment variables.
+It also requires the explicit `PHASE2B_BACKFILL_CONFIRM=REVIEWED_LOCAL_DRY_RUN` acknowledgement after the dry-run report has been reviewed. It does not fall back to application or hosted Supabase environment variables.
 
 Run locally after starting Supabase and applying migrations:
 
@@ -255,6 +255,8 @@ eval "$(npx supabase status -o env)"
 export LOCAL_SUPABASE_URL="$API_URL"
 export LOCAL_SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
 export PHASE2B_BACKFILL=1
+# Set this only after reviewing the output from npm run phase2b:dry-run.
+export PHASE2B_BACKFILL_CONFIRM=REVIEWED_LOCAL_DRY_RUN
 
 # Use an explicit UUID so an interrupted run can be resumed.
 export PHASE2B_RUN_ID="$(node -e "console.log(crypto.randomUUID())")"
