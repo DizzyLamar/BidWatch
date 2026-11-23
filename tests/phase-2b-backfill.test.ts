@@ -60,3 +60,16 @@ test('Phase 2B writer rejects a non-local Supabase client before any query', asy
     /permanently restricted to localhost/,
   );
 });
+
+test('Phase 2B rejects non-ISO or impossible detectedAt timestamps for history versions', () => {
+  for (const detectedAt of ['2026-11-01', '2026-02-30T10:00:00.000Z']) {
+    const result = reconstructHistorySnapshots(current, [{
+      id: '00000000-0000-4000-8000-000000000001', record: {
+        detectedAt, changedFields: ['title'],
+        before: { title: 'Old title' }, after: { title: current.title },
+      },
+    }]);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.reason, /valid detectedAt/);
+  }
+});
