@@ -81,6 +81,36 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
     assert.ok(linkResult.data);
     ids.link = linkResult.data.id;
 
+    const seedObservationResult = await admin.from('procurement_source_observations').insert({
+      source_id: ids.source,
+      source_key: 'legacy-app-record:' + suffix,
+      source_url: 'https://example.test/procurement/legacy-' + suffix,
+      title: 'Legacy-seeded ICT procurement',
+      content_hash: 'legacy-seed-hash-' + suffix,
+    }).select('id').single();
+    assert.ifError(seedObservationResult.error);
+    assert.ok(seedObservationResult.data);
+    ids.seedObservation = seedObservationResult.data.id;
+
+    const seedCanonicalResult = await admin.from('canonical_opportunities').insert({
+      canonical_key: 'legacy-seed-' + suffix,
+      title: 'Legacy-seeded ICT procurement',
+      lifecycle_status: 'unknown',
+    }).select('id').single();
+    assert.ifError(seedCanonicalResult.error);
+    assert.ok(seedCanonicalResult.data);
+    ids.seedCanonical = seedCanonicalResult.data.id;
+
+    const seedLinkResult = await admin.from('canonical_opportunity_sources').insert({
+      canonical_opportunity_id: ids.seedCanonical,
+      observation_id: ids.seedObservation,
+      match_method: 'source_observation_seed',
+      review_status: 'automatic',
+    }).select('id').single();
+    assert.ifError(seedLinkResult.error);
+    assert.ok(seedLinkResult.data);
+    ids.seedLink = seedLinkResult.data.id;
+
     const eventResult = await admin.from('canonical_opportunity_events').insert({
       event_type: 'source_linked',
       canonical_opportunity_id: ids.canonical,
@@ -203,9 +233,9 @@ test('Phase 2A procurement schema preserves global evidence and independent orga
       await admin.from('organisations').delete().in('id', [ids.orgA, ids.orgB].filter(Boolean));
     }
     if (ids.event) await admin.from('canonical_opportunity_events').delete().eq('id', ids.event);
-    if (ids.link) await admin.from('canonical_opportunity_sources').delete().eq('id', ids.link);
-    if (ids.observation) await admin.from('procurement_source_observations').delete().eq('id', ids.observation);
-    if (ids.canonical2) await admin.from('canonical_opportunities').delete().eq('id', ids.canonical2);
+    if (ids.link || ids.seedLink) await admin.from('canonical_opportunity_sources').delete().in('id', [ids.link, ids.seedLink].filter(Boolean));
+    if (ids.observation || ids.seedObservation) await admin.from('procurement_source_observations').delete().in('id', [ids.observation, ids.seedObservation].filter(Boolean));
+    if (ids.canonical2 || ids.seedCanonical) await admin.from('canonical_opportunities').delete().in('id', [ids.canonical2, ids.seedCanonical].filter(Boolean));
     if (ids.canonical) await admin.from('canonical_opportunities').delete().eq('id', ids.canonical);
     if (ids.run) await admin.from('procurement_source_runs').delete().eq('id', ids.run);
     if (ids.source) await admin.from('procurement_sources').delete().eq('id', ids.source);
