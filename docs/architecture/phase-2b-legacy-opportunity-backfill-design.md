@@ -223,7 +223,7 @@ A freshly reset local database may contain no legacy discovery records; in that 
 
 
 ### Dry-run report completeness
-The read-only inventory report retains every row-level finding, not just a capped sample. Invalid imported tender UUIDs are quarantined before any UUID-column lookup, and malformed JSON records are handled before imported-reference extraction. These behaviours are covered by unit tests, including a report with more than 1,000 findings.
+The read-only inventory report retains every row-level finding, not just a capped sample. Invalid imported tender UUIDs are quarantined before any UUID-column lookup, and malformed JSON records are handled before imported-reference extraction. These behaviours are covered by unit tests, including a report with more than 1,000 findings. Invalid optional `deadline` and `details.publishedAt` timestamps are blocking findings in the writer and are quarantined rather than normalized or silently dropped.
 
 
 ### Bounded imported-tender validation
