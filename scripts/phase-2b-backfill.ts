@@ -74,6 +74,15 @@ function arrayOfStrings(value: unknown): string[] {
 function sameJson(a: unknown, b: unknown): boolean {
   return canonicalJson(a ?? null) === canonicalJson(b ?? null);
 }
+function sameField(field: string, a: unknown, b: unknown): boolean {
+  if (field.endsWith('_at')) {
+    if (a == null || b == null) return a == null && b == null;
+    const at = Date.parse(String(a));
+    const bt = Date.parse(String(b));
+    if (Number.isFinite(at) && Number.isFinite(bt)) return at === bt;
+  }
+  return sameJson(a, b);
+}
 function addFinding(findings: Finding[], row: LegacyRow, code: string, message: string) {
   findings.push({ recordId: row.id, collection: row.table_name, code, message });
 }
@@ -418,7 +427,7 @@ async function migrateUpdate(client: any, row: LegacyRow, organisationId: string
   let canonicalId: string;
   if (existingCanonical) {
     for (const [field, value] of Object.entries(canonicalPayload)) {
-      if (!sameJson(existingCanonical[field], value)) {
+      if (!sameField(field, existingCanonical[field], value)) {
         throw new Error('Existing canonical opportunity differs from the deterministic legacy mapping; refusing to overwrite it.');
       }
     }
@@ -439,7 +448,7 @@ async function migrateUpdate(client: any, row: LegacyRow, organisationId: string
   let pursuitId: string;
   if (existingPursuit) {
     for (const [field, value] of Object.entries(desiredPursuit)) {
-      if (!sameJson(existingPursuit[field], value)) {
+      if (!sameField(field, existingPursuit[field], value)) {
         throw new Error('Existing organisation pursuit differs from the legacy mapping; refusing to overwrite organisation workflow state.');
       }
     }
@@ -604,7 +613,7 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
         let targetRunId: string;
         if (existing) {
           for (const [field, value] of Object.entries(payload)) {
-            if (!sameJson(existing[field], value)) {
+            if (!sameField(field, existing[field], value)) {
               throw new Error('Existing source run differs from deterministic legacy mapping; refusing to overwrite it.');
             }
           }
