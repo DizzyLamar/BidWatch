@@ -624,7 +624,7 @@ async function main() {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
   const runId = process.env.PHASE2B_RUN_ID || randomUUID();
-  process.stdout.write('Phase 2B backfill run ID: ' + runId + '\\n');
+  process.stdout.write('Phase 2B backfill run ID: ' + runId + String.fromCharCode(10));
   const summary = await runPhase2BBackfill(client, { runId });
   const outputPath = resolve(process.env.PHASE2B_BACKFILL_REPORT_PATH || 'artifacts/phase-2b-backfill-report.json');
   await mkdir(dirname(outputPath), { recursive: true });
