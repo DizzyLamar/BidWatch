@@ -191,6 +191,29 @@ async function assertResult(result: any, label: string) {
   if (result.error) throw new Error(label + ': ' + result.error.message);
   return result.data;
 }
+function selectLegacyBatch(legacy: Awaited<ReturnType<typeof loadLegacy>>, requestedIds?: string[]) {
+  if (requestedIds === undefined) {
+    return { legacy, requestedRecordIds: null as string[] | null, effectiveRecordIds: null as string[] | null, unresolvedRecordIds: [] as string[] };
+  }
+  const requested = new Set(requestedIds);
+  const available = new Set([
+    ...legacy.updates, ...legacy.changes, ...legacy.runs, ...legacy.tenders,
+  ].map(row => row.id));
+  const unresolvedRecordIds = requestedIds.filter(id => !available.has(id));
+  const updates = legacy.updates.filter(row => requested.has(row.id));
+  const updateIds = new Set(updates.map(row => row.id));
+  const changes = legacy.changes.filter(row =>
+    requested.has(row.id) || (isObject(row.record) && updateIds.has(String(row.record.opportunityUpdateId || ''))));
+  const runs = legacy.runs.filter(row => requested.has(row.id));
+  const referencedTenderIds = new Set(updates
+    .filter(row => row.record.state === 'imported' && typeof row.record.importedTenderId === 'string')
+    .map(row => String(row.record.importedTenderId).toLowerCase()));
+  const tenders = legacy.tenders.filter(row => referencedTenderIds.has(row.id.toLowerCase()));
+  const selected = { ...legacy, updates, changes, runs, tenders };
+  const effectiveRecordIds = [...updates, ...changes, ...runs].map(row => row.id);
+  return { legacy: selected, requestedRecordIds: requestedIds, effectiveRecordIds, unresolvedRecordIds };
+}
+
 async function writeLedger(client: any, input: {
   collection: string; recordId: string; runId: string; organisationId: string;
   status: 'migrated' | 'quarantined'; targetIds?: Record<string, string>; findings?: Finding[];
@@ -629,11 +652,14 @@ async function verifyLedgerTargets(client: any, ledgerRows: any[]) {
   return missing;
 }
 
-export async function runPhase2BBackfill(client: any, options: { runId?: string; generatedAt?: string } = {}) {
+export async function runPhase2BBackfill(client: any, options: { runId?: string; generatedAt?: string; recordIds?: string[] } = {}) {
   const clientUrl = typeof client?.supabaseUrl === 'string' ? client.supabaseUrl : '';
   if (!clientUrl) throw new Error('Backfill requires a Supabase client with an inspectable endpoint.');
   parseLocalSupabaseUrl(clientUrl);
-  const legacy = await loadLegacy(client);
+  if (options.recordIds?.some(id => !UUID.test(id))) throw new Error('recordIds must contain only valid UUIDs.');
+  const loadedLegacy = await loadLegacy(client);
+  const selection = selectLegacyBatch(loadedLegacy, options.recordIds);
+  const legacy = selection.legacy;
   const allRows = [...legacy.updates, ...legacy.changes, ...legacy.runs, ...legacy.tenders];
   const dryRun = buildPhase2BDryRunReport({ organisationId: legacy.organisationId, rows: allRows, generatedAt: options.generatedAt });
   const findings = dryRun.validation.findings as Finding[];
@@ -651,6 +677,11 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
   const summary = {
     runId,
     organisationId: legacy.organisationId,
+    selection: {
+      requestedRecordIds: selection.requestedRecordIds,
+      effectiveRecordIds: selection.effectiveRecordIds,
+      unresolvedRecordIds: selection.unresolvedRecordIds,
+    },
     generatedAt: options.generatedAt || new Date().toISOString(),
     baseline: {
       opportunity_updates: legacy.updates.length,
@@ -773,9 +804,17 @@ export async function runPhase2BBackfill(client: any, options: { runId?: string;
       summary.migrated.versions += history.versions;
     }
 
-    const ledgerCounts = await client.from('legacy_opportunity_backfill_records')
-      .select('legacy_collection,status,legacy_record_id,target_ids,findings').eq('organisation_id', legacy.organisationId);
-    const ledger = await assertResult(ledgerCounts, 'Could not reconcile run ledger') || [];
+    let ledger: any[] = [];
+    if (selection.effectiveRecordIds === null) {
+      const ledgerCounts = await client.from('legacy_opportunity_backfill_records')
+        .select('legacy_collection,status,legacy_record_id,target_ids,findings').eq('organisation_id', legacy.organisationId);
+      ledger = await assertResult(ledgerCounts, 'Could not reconcile run ledger') || [];
+    } else if (selection.effectiveRecordIds.length) {
+      const ledgerCounts = await client.from('legacy_opportunity_backfill_records')
+        .select('legacy_collection,status,legacy_record_id,target_ids,findings')
+        .eq('organisation_id', legacy.organisationId).in('legacy_record_id', selection.effectiveRecordIds);
+      ledger = await assertResult(ledgerCounts, 'Could not reconcile selected backfill records') || [];
+    }
     const missingTargetReferences = await verifyLedgerTargets(client, ledger);
     const ledgerByCollection = Object.fromEntries(['opportunity_updates', 'opportunity_changes', 'opportunity_source_runs'].map(collection => [
       collection,
@@ -855,8 +894,11 @@ async function main() {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
   const runId = process.env.PHASE2B_RUN_ID || randomUUID();
+  const recordIds = process.env.PHASE2B_BACKFILL_RECORD_IDS === undefined
+    ? undefined
+    : process.env.PHASE2B_BACKFILL_RECORD_IDS.split(',').map(value => value.trim()).filter(Boolean);
   process.stdout.write('Phase 2B backfill run ID: ' + runId + String.fromCharCode(10));
-  const summary = await runPhase2BBackfill(client, { runId });
+  const summary = await runPhase2BBackfill(client, { runId, recordIds });
   const outputPath = resolve(process.env.PHASE2B_BACKFILL_REPORT_PATH || 'artifacts/phase-2b-backfill-report.json');
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(summary, null, 2) + '\n', { mode: 0o600 });
