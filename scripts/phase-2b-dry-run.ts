@@ -108,6 +108,9 @@ export function buildPhase2BDryRunReport(input: {
       new Date(String(item.lastSeenAt)).getTime() < new Date(String(item.firstSeenAt)).getTime()) {
       addFinding(findings, row, 'seen_order_invalid', 'lastSeenAt is earlier than firstSeenAt.');
     }
+    if (item.deadline != null && item.deadline !== '' && !validTimestamp(item.deadline)) {
+      addFinding(findings, row, 'invalid_deadline', 'deadline must be a valid timezone-aware ISO timestamp when present.');
+    }
     if (!UPDATE_STATES.has(String(item.state))) addFinding(findings, row, 'unknown_update_state', 'Legacy workflow state is not recognised.');
     if (item.fitLevel != null && !FIT_LEVELS.has(String(item.fitLevel))) addFinding(findings, row, 'invalid_fit_level', 'fitLevel is not accepted by the Phase 2 schema.');
     if (item.relevanceScore != null && (!Number.isFinite(Number(item.relevanceScore)) || Number(item.relevanceScore) < 0 || Number(item.relevanceScore) > 100)) {
@@ -122,6 +125,10 @@ export function buildPhase2BDryRunReport(input: {
     if (item.details != null && !isObject(item.details)) addFinding(findings, row, 'invalid_details', 'details must be an object when present.');
     if (isObject(item.details) && item.details.documents != null && !validDocumentLinks(item.details.documents)) {
       addFinding(findings, row, 'invalid_documents', 'details.documents must contain objects with non-empty titles and credential-free HTTP(S) URLs.');
+    }
+    if (isObject(item.details) && item.details.publishedAt != null && item.details.publishedAt !== '' &&
+        !validTimestamp(item.details.publishedAt)) {
+      addFinding(findings, row, 'invalid_published_at', 'details.publishedAt must be a valid timezone-aware ISO timestamp when present.');
     }
     if (item.state === 'dismissed' && !validTimestamp(item.dismissedAt)) {
       addFinding(findings, row, 'dismissal_timestamp_unresolved', 'No valid legacy dismissedAt timestamp exists; do not invent dismissed_at.');
@@ -162,6 +169,10 @@ export function buildPhase2BDryRunReport(input: {
     if (run.durationMs != null && (!Number.isFinite(Number(run.durationMs)) || Number(run.durationMs) < 0)) {
       addFinding(findings, row, 'invalid_duration', 'durationMs must be a non-negative number.');
     }
+    if (run.durationMs != null && validTimestamp(run.checkedAt) &&
+        !Number.isFinite(new Date(Date.parse(String(run.checkedAt)) - Number(run.durationMs)).getTime())) {
+      addFinding(findings, row, 'invalid_duration', 'durationMs cannot produce a valid started_at timestamp.');
+    }
   }
 
   for (const row of changes) {
@@ -196,7 +207,7 @@ export function buildPhase2BDryRunReport(input: {
     'invalid_record_id', 'invalid_record_shape', 'scope_mismatch', 'unknown_source', 'missing_title', 'invalid_notice_url',
     'invalid_first_seen', 'invalid_last_seen', 'seen_order_invalid', 'unknown_update_state',
     'invalid_fit_level', 'invalid_relevance_score', 'invalid_categories', 'invalid_matched_terms',
-    'invalid_details', 'invalid_documents', 'dismissal_timestamp_unresolved', 'imported_tender_invalid_id', 'imported_tender_missing',
+    'invalid_details', 'invalid_documents', 'invalid_deadline', 'invalid_published_at', 'dismissal_timestamp_unresolved', 'imported_tender_invalid_id', 'imported_tender_missing',
     'imported_tender_scope_mismatch', 'imported_tender_invalid',
   ]);
   const blockedUpdateIds = new Set(findings.filter(f => f.collection === 'opportunity_updates' && blockingCodes.has(f.code)).map(f => f.recordId));
