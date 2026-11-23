@@ -471,7 +471,7 @@ export const handler = router({
   'GET /api/opportunities/shadow-compare': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => {
     let localDatabase = false;
     try {
-      const host = new URL(process.env.SUPABASE_URL || '').hostname;
+      const host = new URL(process.env.SUPABASE_URL || '').hostname.replace(/^\\[|\\]$/g, '');
       localDatabase = ['localhost', '127.0.0.1', '::1'].includes(host);
     } catch { /* A missing or invalid URL must keep shadow reads disabled. */ }
     if (process.env.PHASE2C_SHADOW_COMPARE !== '1' || !localDatabase) {
