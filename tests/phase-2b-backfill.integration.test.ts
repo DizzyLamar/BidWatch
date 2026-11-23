@@ -111,6 +111,14 @@ test('Phase 2B backfill is resumable, idempotent, tenant-scoped and preserves le
     assert.equal(first.reconciliation.quarantinesRemain, true);
     assert.equal(first.reconciliation.productionTouched, false);
 
+    const invalidRunLedger = await admin.from('legacy_opportunity_backfill_records')
+      .select('status,target_ids,findings').eq('legacy_collection', 'opportunity_source_runs')
+      .eq('legacy_record_id', invalidSourceRunId).single();
+    assert.ifError(invalidRunLedger.error);
+    assert.equal(invalidRunLedger.data.status, 'quarantined');
+    assert.equal(invalidRunLedger.data.target_ids.source_run_id, undefined);
+    assert.ok(invalidRunLedger.data.findings.some((finding: any) => finding.code === 'invalid_access_method'));
+
     const observation = await admin.from('procurement_source_observations').select('id,source_key,raw_payload')
       .eq('source_key', 'legacy-app-record:' + updateId).single();
     assert.ifError(observation.error);
