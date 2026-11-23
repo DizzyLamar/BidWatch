@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import {
   buildPhase2BDryRunReport,
@@ -792,6 +792,7 @@ async function main() {
   const outputPath = resolve(process.env.PHASE2B_BACKFILL_REPORT_PATH || 'artifacts/phase-2b-backfill-report.json');
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(summary, null, 2) + '\n', { mode: 0o600 });
+  await chmod(outputPath, 0o600);
   process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
 }
 
