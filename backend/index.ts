@@ -484,7 +484,29 @@ export const handler = router({
     // collapses corroborating sources and hides dismissed rows, which is unsuitable
     // for a one-to-one migration reconciliation.
     const [legacy, canonical] = await Promise.all([
-      db.list<OpportunityUpdate>('opportunity_updates', { limit: maxRecords }),
+      (async () => {
+        const items: OpportunityUpdate[] = [];
+        const pageSize = 500;
+        let offset = 0;
+        let complete = false;
+        while (items.length < maxRecords) {
+          const limit = Math.min(pageSize, maxRecords - items.length);
+          const page = await db.list<OpportunityUpdate>('opportunity_updates', { limit, offset });
+          items.push(...page.items);
+          if (page.items.length < limit) {
+            complete = true;
+            break;
+          }
+          offset += page.items.length;
+        }
+        if (items.length === maxRecords) {
+          // Distinguish exactly 5,000 rows from a truncated inventory without
+          // requesting a response larger than the local API row cap.
+          const remainder = await db.list<OpportunityUpdate>('opportunity_updates', { limit: 1, offset });
+          complete = remainder.items.length === 0;
+        }
+        return { items, complete };
+      })(),
       (async () => {
         const items = [];
         let cursor: { updatedAt: string; id: string } | undefined;
@@ -508,7 +530,7 @@ export const handler = router({
     const comparison = buildOpportunityShadowComparison(
       legacy.items.map(item => ({ id: item.id, sourceId: item.sourceId, state: item.state })),
       canonical.items.map(item => ({ canonical_key: item.canonical_opportunities.canonical_key, state: item.state })),
-      legacy.items.length < maxRecords && canonical.complete,
+      legacy.complete && canonical.complete,
     );
     return json({ enabled: true, mode: 'shadow-only', comparison });
   }],
