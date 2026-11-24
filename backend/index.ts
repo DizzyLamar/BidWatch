@@ -489,7 +489,7 @@ export const handler = router({
         let cursor: { updatedAt: string; id: string } | undefined;
         let complete = false;
         while (items.length < maxRecords) {
-          const page = await procurementReadRepository.listOrganisationOpportunitiesPage({
+          const page = await procurementReadRepository.listOrganisationOpportunityIdentitiesPage({
             limit: Math.min(100, maxRecords - items.length),
             ...(cursor ? { cursor } : {}),
           });
