@@ -8,6 +8,7 @@ export type OpportunityShadowComparison = {
   unmatchedCanonicalCount: number;
   stateMismatchCount: number;
   duplicateCanonicalKeyCount: number;
+  invalidLegacyStateCount: number;
   complete: boolean;
 };
 
@@ -31,14 +32,22 @@ export function buildOpportunityShadowComparison(
 
   let matchedCount = 0;
   let stateMismatchCount = 0;
+  let invalidLegacyStateCount = 0;
+  const legacyKeys = new Set(legacy.map(item => `legacy:${item.sourceId}:${item.id}`));
   for (const item of legacy) {
     const key = `legacy:${item.sourceId}:${item.id}`;
     const target = canonicalByKey.get(key);
     if (!target) continue;
     matchedCount += 1;
     const expectedState = item.state === 'imported' ? 'converted'
-      : item.state === 'dismissed' ? 'dismissed' : 'new';
-    if (target.state !== expectedState) stateMismatchCount += 1;
+      : item.state === 'dismissed' ? 'dismissed'
+      : item.state === 'new' ? 'new' : null;
+    if (expectedState === null) {
+      invalidLegacyStateCount += 1;
+      stateMismatchCount += 1;
+    } else if (target.state !== expectedState) {
+      stateMismatchCount += 1;
+    }
   }
 
   return {
@@ -46,9 +55,10 @@ export function buildOpportunityShadowComparison(
     canonicalCount: canonical.length,
     matchedCount,
     missingCanonicalCount: legacy.length - matchedCount,
-    unmatchedCanonicalCount: Math.max(0, canonicalByKey.size - matchedCount),
+    unmatchedCanonicalCount: canonical.filter(item => !legacyKeys.has(item.canonical_key)).length,
     stateMismatchCount,
     duplicateCanonicalKeyCount: duplicateKeys.size,
+    invalidLegacyStateCount,
     complete,
   };
 }
