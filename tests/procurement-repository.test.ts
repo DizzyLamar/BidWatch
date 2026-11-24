@@ -152,3 +152,38 @@ test('database errors are surfaced to the backend caller', async () => {
 
   await assert.rejects(repository.listOrganisationOpportunities(), /database unavailable/);
 });
+
+
+test('shadow identity pages select only canonical keys and tenant workflow state', async () => {
+  const rows = [{
+    id: OPPORTUNITY_ID,
+    updated_at: '2026-11-24T08:00:00.000Z',
+    state: 'pursuing',
+    canonical_opportunities: { canonical_key: 'legacy:ppda:legacy-record' },
+  }];
+  const fake = fakeClient({ data: rows, error: null });
+  const scope: DatabaseScope = { kind: 'organisation', organisationId: ORGANISATION_A };
+  const repository = createProcurementReadRepository(fake.client, () => scope);
+
+  const page = await repository.listOrganisationOpportunityIdentitiesPage({ limit: 10 });
+  assert.deepEqual(page.items, rows);
+  assert.equal(page.nextCursor, null);
+  assert.ok(fake.calls.some(call =>
+    call.method === 'select'
+      && call.args[0] === 'id, updated_at, state, canonical_opportunities!inner ( canonical_key )'
+  ));
+  assert.ok(fake.calls.some(call =>
+    call.method === 'eq' && call.args[0] === 'organisation_id' && call.args[1] === ORGANISATION_A
+  ));
+  assert.ok(fake.calls.some(call => call.method === 'limit' && call.args[0] === 11));
+});
+
+test('shadow identity pages reject missing tenant scope before querying Supabase', async () => {
+  const fake = fakeClient();
+  const repository = createProcurementReadRepository(fake.client, () => null);
+  await assert.rejects(
+    repository.listOrganisationOpportunityIdentitiesPage(),
+    /verified active organisation scope/,
+  );
+  assert.equal(fake.calls.length, 0);
+});

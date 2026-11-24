@@ -1,10 +1,13 @@
 import { timingSafeEqual } from 'node:crypto';
+import { readPagedLegacyInventory } from './legacy-opportunity-inventory';
 import { db, router, json, error, requireAuth, supabaseAdmin, withDatabaseScope, type RouterContext } from './runtime';
 import { requireOrganisation } from './tenancy';
 import { storageService } from './storage';
-import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES } from './opportunity-discovery';
+import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES, type OpportunityUpdate } from './opportunity-discovery';
 import { verifyOpportunity } from './opportunity-verification';
 import { runOrganisationTasks } from './scheduled-jobs';
+import { procurementReadRepository } from './procurement-repository';
+import { buildOpportunityShadowComparison } from './opportunity-shadow';
 
 const now = () => new Date().toISOString();
 
@@ -466,6 +469,52 @@ export const handler = router({
   'PUT /api/me/onboarding': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
   'GET /api/config': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => { await ensureDefaultCategories(); const records = await listAll<{ name: string; active: boolean }>('categories'); return json({ categories: records.filter(x => x.active).map(x => x.name), categoryRecords: records, statuses: STATUSES }); }],
   'GET /api/opportunities/sources': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => json({ sources: DISCOVERY_SOURCES })],
+  'GET /api/opportunities/shadow-compare': [requireAuth(), requireOrganisation(), requirePermission('bids.view'), async () => {
+    const maxRecords = 5000;
+    let localDatabase = false;
+    try {
+      const databaseUrl = new URL(process.env.SUPABASE_URL || '');
+      localDatabase = ['http:', 'https:'].includes(databaseUrl.protocol)
+        && ['localhost', '127.0.0.1', '::1', '[::1]'].includes(databaseUrl.hostname);
+    } catch { /* A missing or invalid URL must keep shadow reads disabled. */ }
+    if (process.env.PHASE2C_SHADOW_COMPARE !== '1' || !localDatabase) {
+      return json({ enabled: false, mode: 'disabled', reason: 'Shadow comparison is available only when explicitly enabled against a local Supabase database.' });
+    }
+
+    // Use raw tenant-scoped legacy records: the UI adapter collapses corroborating
+    // sources and hides dismissed records, neither of which is valid for reconciliation.
+    const [legacy, canonical] = await Promise.all([
+      readPagedLegacyInventory(
+        options => db.list<OpportunityUpdate>('opportunity_updates', options),
+        { maxRecords, pageSize: 500 },
+      ),
+      (async () => {
+        const items = [];
+        let cursor: { updatedAt: string; id: string } | undefined;
+        let complete = false;
+        while (items.length < maxRecords) {
+          const page = await procurementReadRepository.listOrganisationOpportunityIdentitiesPage({
+            limit: Math.min(100, maxRecords - items.length),
+            ...(cursor ? { cursor } : {}),
+          });
+          items.push(...page.items);
+          if (!page.nextCursor) {
+            complete = true;
+            break;
+          }
+          cursor = page.nextCursor;
+        }
+        return { items, complete };
+      })(),
+    ]);
+
+    const comparison = buildOpportunityShadowComparison(
+      legacy.items.map(item => ({ id: item.id, sourceId: item.sourceId, state: item.state })),
+      canonical.items.map(item => ({ canonical_key: item.canonical_opportunities.canonical_key, state: item.state })),
+      legacy.complete && canonical.complete,
+    );
+    return json({ enabled: true, mode: 'shadow-only', comparison });
+  }],
   'GET /api/opportunities/updates': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => { const updates = await listOpportunityUpdates(60); return json({ updates, meta: { build: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'unknown', count: updates.length, supabaseHost: process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).host : 'not-configured' } }); }],
   'GET /api/opportunities/watchlists': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async ctx => { const u = await actor(ctx); const items = await listAll<Record<string, unknown>>('opportunity_watchlists'); return json({ watchlists: items.filter(x => x.userId === u.id).sort((a,b) => String(a.name).localeCompare(String(b.name))) }); }],
   'POST /api/opportunities/watchlists': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async ctx => { const u = await actor(ctx); const b = ctx.body as Record<string, unknown>; const name = text(b.name, 'title'); if (!name) return error('Watchlist name is required.', 400); const filters = b.filters && typeof b.filters === 'object' ? b.filters : {}; const [id] = await db.add('opportunity_watchlists', [{ userId: u.id, name, filters, createdAt: now(), updatedAt: now() }]); if (!id) return error('Could not save watchlist.', 500); return json({ watchlist: await getById<Record<string, unknown>>('opportunity_watchlists', id) }, 201); }],

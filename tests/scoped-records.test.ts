@@ -24,12 +24,14 @@ class MemoryQuery {
   private inserted: Array<Record<string, unknown>> = [];
   private patch: Record<string, unknown> = {};
   private maxRows = Number.POSITIVE_INFINITY;
+  private startRow = 0;
 
   constructor(private rows: Row[]) {}
 
   select(_columns: string) { return this; }
   order(_column: string, _options: unknown) { return this; }
   limit(value: number) { this.maxRows = value; return this; }
+  range(from: number, to: number) { this.startRow = from; this.maxRows = to - from + 1; return this; }
   eq(column: string, value: unknown) {
     this.filters.push(row => (row as unknown as Record<string, unknown>)[column] === value);
     return this;
@@ -65,7 +67,7 @@ class MemoryQuery {
 
     const matches = this.rows.filter(row => this.filters.every(filter => filter(row)));
     if (this.action === 'select') {
-      return { data: matches.slice(0, this.maxRows).map(row => ({ ...row, record: { ...row.record } })), error: null };
+      return { data: matches.slice(this.startRow, this.startRow + this.maxRows).map(row => ({ ...row, record: { ...row.record } })), error: null };
     }
     if (this.action === 'update') {
       for (const row of matches) Object.assign(row, this.patch);
@@ -184,4 +186,30 @@ test('legacy storage paths are available only to the legacy workspace and never 
   assert.doesNotThrow(() => assertOrganisationStoragePath('tenders/old-file.pdf', legacy, true));
   assert.throws(() => assertOrganisationStoragePath('tenders/old-file.pdf', legacy, false), /outside the active organisation/);
   assert.throws(() => assertOrganisationStoragePath('tenders/old-file.pdf', ordinary, true), /outside the active organisation/);
+});
+
+
+test('tenant list supports stable bounded pagination beyond the Supabase API row cap', async () => {
+  const rows: Row[] = Array.from({ length: 1205 }, (_, index) => ({
+    id: `opportunity-${String(index).padStart(4, '0')}`,
+    table_name: 'opportunity_updates',
+    record: { sourceId: 'ppda', state: 'new', title: `Opportunity ${index}` },
+    scope_type: 'organisation',
+    organisation_id: 'org-a',
+    created_at: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+  }));
+  const client = { from: (_table: string) => new MemoryQuery(rows) };
+  const repository = createScopedRecordRepository(
+    client,
+    () => ({ kind: 'organisation', organisationId: 'org-a' }),
+  );
+
+  const first = await repository.list<{ title: string }>('opportunity_updates', { limit: 500, offset: 0 });
+  const second = await repository.list<{ title: string }>('opportunity_updates', { limit: 500, offset: 500 });
+  const third = await repository.list<{ title: string }>('opportunity_updates', { limit: 500, offset: 1000 });
+  assert.equal(first.items.length, 500);
+  assert.equal(second.items.length, 500);
+  assert.equal(third.items.length, 205);
+  assert.equal(new Set([...first.items, ...second.items, ...third.items].map(row => row.id)).size, 1205);
+  assert.ok(first.items.every(row => row.id.startsWith('opportunity-')));
 });

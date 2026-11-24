@@ -58,10 +58,16 @@ export function createScopedRecordRepository(
   }
 
   return {
-    async list<T>(table: string, options: { limit?: number } = {}) {
+    async list<T>(table: string, options: { limit?: number; offset?: number } = {}) {
+      const requestedLimit = Number.isFinite(options.limit) ? Math.trunc(options.limit as number) : 500;
+      const requestedOffset = Number.isFinite(options.offset) ? Math.trunc(options.offset as number) : 0;
+      const limit = Math.max(1, Math.min(requestedLimit, 5000));
+      const offset = Math.max(0, requestedOffset);
       const query = client().from('app_records').select('id,table_name,record')
-        .eq('table_name', table).order('created_at', { ascending: false })
-        .limit(Math.min(options.limit ?? 500, 5000));
+        .eq('table_name', table)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(offset, offset + limit - 1);
       const rows = await checked<RecordRow[]>(applyDatabaseScope(table, query));
       return { items: rows.map(row => ({ ...(row.record as T), id: row.id })) };
     },
