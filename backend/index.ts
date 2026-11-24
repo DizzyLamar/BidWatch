@@ -472,8 +472,9 @@ export const handler = router({
     const maxRecords = 5000;
     let localDatabase = false;
     try {
-      const host = new URL(process.env.SUPABASE_URL || '').hostname;
-      localDatabase = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host);
+      const databaseUrl = new URL(process.env.SUPABASE_URL || '');
+      localDatabase = ['http:', 'https:'].includes(databaseUrl.protocol)
+        && ['localhost', '127.0.0.1', '::1', '[::1]'].includes(databaseUrl.hostname);
     } catch { /* A missing or invalid URL must keep shadow reads disabled. */ }
     if (process.env.PHASE2C_SHADOW_COMPARE !== '1' || !localDatabase) {
       return json({ enabled: false, mode: 'disabled', reason: 'Shadow comparison is available only when explicitly enabled against a local Supabase database.' });
