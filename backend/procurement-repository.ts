@@ -87,6 +87,18 @@ export type OrganisationOpportunityPage = {
   nextCursor: OpportunityCursor | null;
 };
 
+export type ProcurementOpportunityIdentityRow = {
+  id: string;
+  updated_at: string;
+  state: OpportunityState;
+  canonical_opportunities: { canonical_key: string };
+};
+
+export type OrganisationOpportunityIdentityPage = {
+  items: ProcurementOpportunityIdentityRow[];
+  nextCursor: OpportunityCursor | null;
+};
+
 const OPPORTUNITY_SELECT = `
   id,
   organisation_id,
@@ -205,6 +217,47 @@ export function createProcurementReadRepository(
   }
 
   return {
+    async listOrganisationOpportunityIdentitiesPage(
+      options: ListOrganisationOpportunitiesOptions = {},
+    ): Promise<OrganisationOpportunityIdentityPage> {
+      const organisationId = activeOrganisationId(getScope);
+      const limit = boundedLimit(options.limit);
+      if (options.cursor && !validCursor(options.cursor)) {
+        throw new Error('Invalid procurement opportunity cursor.');
+      }
+
+      let query = database()
+        .from('organisation_opportunities')
+        .select('id, updated_at, state, canonical_opportunities!inner ( canonical_key )')
+        .eq('organisation_id', organisationId);
+
+      if (options.state) query = query.eq('state', options.state);
+      if (options.cursor) {
+        const timestamp = options.cursor.updatedAt;
+        query = query.or(
+          `updated_at.lt.${timestamp},and(updated_at.eq.${timestamp},id.lt.${options.cursor.id})`,
+        );
+      }
+
+      const { data, error } = await query
+        .order('updated_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(limit + 1);
+
+      if (error) throw new Error(error.message);
+      const rows = (data || []) as ProcurementOpportunityIdentityRow[];
+      const hasMore = rows.length > limit;
+      const items = rows.slice(0, limit);
+      const lastItem = items[items.length - 1];
+
+      return {
+        items,
+        nextCursor: hasMore && lastItem
+          ? { updatedAt: lastItem.updated_at, id: lastItem.id }
+          : null,
+      };
+    },
+
     async listOrganisationOpportunitiesPage(
       options: ListOrganisationOpportunitiesOptions = {},
     ): Promise<OrganisationOpportunityPage> {
