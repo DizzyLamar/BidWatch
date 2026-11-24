@@ -469,7 +469,7 @@ export const handler = router({
   'PUT /api/me/onboarding': [requireAuth(), requireOrganisation(), async ctx => { const u = await actor(ctx); const completed = Boolean((ctx.body as Record<string, unknown>)?.completed); const next = { ...u, onboardingCompleted: completed, updatedAt: now() }; await db.update('users', [{ id: u.id, record: next }]); return json({ onboardingCompleted: completed }); }],
   'GET /api/config': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => { await ensureDefaultCategories(); const records = await listAll<{ name: string; active: boolean }>('categories'); return json({ categories: records.filter(x => x.active).map(x => x.name), categoryRecords: records, statuses: STATUSES }); }],
   'GET /api/opportunities/sources': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => json({ sources: DISCOVERY_SOURCES })],
-  'GET /api/opportunities/shadow-compare': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => {
+  'GET /api/opportunities/shadow-compare': [requireAuth(), requireOrganisation(), requirePermission('bids.view'), async () => {
     const maxRecords = 5000;
     let localDatabase = false;
     try {
@@ -481,15 +481,13 @@ export const handler = router({
       return json({ enabled: false, mode: 'disabled', reason: 'Shadow comparison is available only when explicitly enabled against a local Supabase database.' });
     }
 
-    // Read the raw tenant-scoped legacy collection. The UI adapter intentionally
-    // collapses corroborating sources and hides dismissed rows, which is unsuitable
-    // for a one-to-one mig      readPagedLegacyInventory(
+    // Use raw tenant-scoped legacy records: the UI adapter collapses corroborating
+    // sources and hides dismissed records, neither of which is valid for reconciliation.
+    const [legacy, canonical] = await Promise.all([
+      readPagedLegacyInventory(
         options => db.list<OpportunityUpdate>('opportunity_updates', options),
         { maxRecords, pageSize: 500 },
-      ),ems.length === 0;
-        }
-        return { items, complete };
-      })(),
+      ),
       (async () => {
         const items = [];
         let cursor: { updatedAt: string; id: string } | undefined;
