@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildOpportunityShadowComparison } from '../backend/opportunity-shadow';
+import { readPagedLegacyInventory } from '../backend/legacy-opportunity-inventory';
 
 test('shadow comparison uses the deterministic Phase 2B legacy mapping', () => {
   const report = buildOpportunityShadowComparison([
@@ -68,4 +69,39 @@ test('unmatched canonical count includes every canonical row without a legacy id
   );
   assert.equal(report.unmatchedCanonicalCount, 2);
   assert.equal(report.duplicateCanonicalKeyCount, 1);
+});
+
+
+test('legacy inventory pagination traverses more than the PostgREST 1,000-row cap', async () => {
+  const records = Array.from({ length: 1205 }, (_, id) => ({ id, sourceId: 'ppda', state: 'new' }));
+  const calls: Array<{ limit: number; offset: number }> = [];
+  const result = await readPagedLegacyInventory(async ({ limit, offset }) => {
+    calls.push({ limit, offset });
+    // Model a PostgREST server that never returns more than its configured
+    // maximum, even when the caller asks for more.
+    return { items: records.slice(offset, offset + Math.min(limit, 1000)) };
+  }, { maxRecords: 5000, pageSize: 500 });
+  assert.equal(result.items.length, 1205);
+  assert.equal(result.complete, true);
+  assert.deepEqual(calls.map(call => call.offset), [0, 500, 1000]);
+});
+
+test('legacy inventory is incomplete when the configured comparison bound is exceeded', async () => {
+  const records = Array.from({ length: 5001 }, (_, id) => ({ id }));
+  const result = await readPagedLegacyInventory(
+    async ({ limit, offset }) => ({ items: records.slice(offset, offset + limit) }),
+    { maxRecords: 5000, pageSize: 500 },
+  );
+  assert.equal(result.items.length, 5000);
+  assert.equal(result.complete, false);
+});
+
+test('legacy inventory reports an exactly-full bounded inventory as complete', async () => {
+  const records = Array.from({ length: 5000 }, (_, id) => ({ id }));
+  const result = await readPagedLegacyInventory(
+    async ({ limit, offset }) => ({ items: records.slice(offset, offset + limit) }),
+    { maxRecords: 5000, pageSize: 500 },
+  );
+  assert.equal(result.items.length, 5000);
+  assert.equal(result.complete, true);
 });
