@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { db, router, json, error, requireAuth, supabaseAdmin, withDatabaseScope, type RouterContext } from './runtime';
 import { requireOrganisation } from './tenancy';
 import { storageService } from './storage';
-import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES } from './opportunity-discovery';
+import { discoverPlatformOpportunities, listOpportunityUpdates, persistOpportunityUpdates, OPPORTUNITY_SOURCES as DISCOVERY_SOURCES, type OpportunityUpdate } from './opportunity-discovery';
 import { verifyOpportunity } from './opportunity-verification';
 import { runOrganisationTasks } from './scheduled-jobs';
 import { procurementReadRepository } from './procurement-repository';
@@ -469,22 +469,45 @@ export const handler = router({
   'GET /api/config': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => { await ensureDefaultCategories(); const records = await listAll<{ name: string; active: boolean }>('categories'); return json({ categories: records.filter(x => x.active).map(x => x.name), categoryRecords: records, statuses: STATUSES }); }],
   'GET /api/opportunities/sources': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => json({ sources: DISCOVERY_SOURCES })],
   'GET /api/opportunities/shadow-compare': [requireAuth(), requireOrganisation(),requirePermission('bids.view'), async () => {
+    const maxRecords = 5000;
     let localDatabase = false;
     try {
-      const host = new URL(process.env.SUPABASE_URL || '').hostname.replace(/^\\[|\\]$/g, '');
-      localDatabase = ['localhost', '127.0.0.1', '::1'].includes(host);
+      const host = new URL(process.env.SUPABASE_URL || '').hostname;
+      localDatabase = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host);
     } catch { /* A missing or invalid URL must keep shadow reads disabled. */ }
     if (process.env.PHASE2C_SHADOW_COMPARE !== '1' || !localDatabase) {
       return json({ enabled: false, mode: 'disabled', reason: 'Shadow comparison is available only when explicitly enabled against a local Supabase database.' });
     }
+
+    // Read the raw tenant-scoped legacy collection. The UI adapter intentionally
+    // collapses corroborating sources and hides dismissed rows, which is unsuitable
+    // for a one-to-one migration reconciliation.
     const [legacy, canonical] = await Promise.all([
-      listOpportunityUpdates(100),
-      procurementReadRepository.listOrganisationOpportunitiesPage({ limit: 100 }),
+      db.list<OpportunityUpdate>('opportunity_updates', { limit: maxRecords }),
+      (async () => {
+        const items = [];
+        let cursor: { updatedAt: string; id: string } | undefined;
+        let complete = false;
+        while (items.length < maxRecords) {
+          const page = await procurementReadRepository.listOrganisationOpportunitiesPage({
+            limit: Math.min(100, maxRecords - items.length),
+            ...(cursor ? { cursor } : {}),
+          });
+          items.push(...page.items);
+          if (!page.nextCursor) {
+            complete = true;
+            break;
+          }
+          cursor = page.nextCursor;
+        }
+        return { items, complete };
+      })(),
     ]);
+
     const comparison = buildOpportunityShadowComparison(
-      legacy.map(item => ({ id: item.id, sourceId: item.sourceId, state: item.state })),
+      legacy.items.map(item => ({ id: item.id, sourceId: item.sourceId, state: item.state })),
       canonical.items.map(item => ({ canonical_key: item.canonical_opportunities.canonical_key, state: item.state })),
-      legacy.length < 100 && canonical.nextCursor === null,
+      legacy.items.length < maxRecords && canonical.complete,
     );
     return json({ enabled: true, mode: 'shadow-only', comparison });
   }],
