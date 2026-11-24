@@ -36,16 +36,15 @@ export function buildOpportunityShadowComparison(
   const legacyKeys = new Set(legacy.map(item => `legacy:${item.sourceId}:${item.id}`));
   for (const item of legacy) {
     const key = `legacy:${item.sourceId}:${item.id}`;
-    const target = canonicalByKey.get(key);
-    if (!target) continue;
-    matchedCount += 1;
     const expectedState = item.state === 'imported' ? 'converted'
       : item.state === 'dismissed' ? 'dismissed'
       : item.state === 'new' ? 'new' : null;
-    if (expectedState === null) {
-      invalidLegacyStateCount += 1;
-      stateMismatchCount += 1;
-    } else if (target.state !== expectedState) {
+    if (expectedState === null) invalidLegacyStateCount += 1;
+
+    const target = canonicalByKey.get(key);
+    if (!target) continue;
+    matchedCount += 1;
+    if (expectedState === null || target.state !== expectedState) {
       stateMismatchCount += 1;
     }
   }
