@@ -16,7 +16,7 @@ test('shadow comparison uses the deterministic Phase 2B legacy mapping', () => {
   assert.deepEqual(report, {
     legacyCount: 3, canonicalCount: 4, matchedCount: 3,
     missingCanonicalCount: 0, unmatchedCanonicalCount: 1,
-    stateMismatchCount: 1, duplicateCanonicalKeyCount: 0, complete: true,
+    stateMismatchCount: 1, duplicateCanonicalKeyCount: 0, invalidLegacyStateCount: 0, complete: true,
   });
 });
 
@@ -44,4 +44,28 @@ test('shadow comparison never assumes a match from a similar title or source alo
   );
   assert.equal(report.matchedCount, 0);
   assert.equal(report.missingCanonicalCount, 1);
+});
+
+
+test('shadow comparison flags unsupported legacy workflow states instead of treating them as new', () => {
+  const report = buildOpportunityShadowComparison(
+    [{ id: 'legacy-a', sourceId: 'ppda', state: 'unexpected-state' }],
+    [{ canonical_key: 'legacy:ppda:legacy-a', state: 'new' }],
+  );
+  assert.equal(report.matchedCount, 1);
+  assert.equal(report.invalidLegacyStateCount, 1);
+  assert.equal(report.stateMismatchCount, 1);
+});
+
+test('unmatched canonical count includes every canonical row without a legacy identity', () => {
+  const report = buildOpportunityShadowComparison(
+    [{ id: 'legacy-a', sourceId: 'ppda', state: 'new' }],
+    [
+      { canonical_key: 'legacy:ppda:legacy-a', state: 'new' },
+      { canonical_key: 'legacy:unknown:extra', state: 'new' },
+      { canonical_key: 'legacy:unknown:extra', state: 'new' },
+    ],
+  );
+  assert.equal(report.unmatchedCanonicalCount, 2);
+  assert.equal(report.duplicateCanonicalKeyCount, 1);
 });
