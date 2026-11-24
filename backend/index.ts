@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { readPagedLegacyInventory } from './legacy-opportunity-inventory';
 import { db, router, json, error, requireAuth, supabaseAdmin, withDatabaseScope, type RouterContext } from './runtime';
 import { requireOrganisation } from './tenancy';
 import { storageService } from './storage';
@@ -482,28 +483,10 @@ export const handler = router({
 
     // Read the raw tenant-scoped legacy collection. The UI adapter intentionally
     // collapses corroborating sources and hides dismissed rows, which is unsuitable
-    // for a one-to-one migration reconciliation.
-    const [legacy, canonical] = await Promise.all([
-      (async () => {
-        const items: OpportunityUpdate[] = [];
-        const pageSize = 500;
-        let offset = 0;
-        let complete = false;
-        while (items.length < maxRecords) {
-          const limit = Math.min(pageSize, maxRecords - items.length);
-          const page = await db.list<OpportunityUpdate>('opportunity_updates', { limit, offset });
-          items.push(...page.items);
-          if (page.items.length < limit) {
-            complete = true;
-            break;
-          }
-          offset += page.items.length;
-        }
-        if (items.length === maxRecords) {
-          // Distinguish exactly 5,000 rows from a truncated inventory without
-          // requesting a response larger than the local API row cap.
-          const remainder = await db.list<OpportunityUpdate>('opportunity_updates', { limit: 1, offset });
-          complete = remainder.items.length === 0;
+    // for a one-to-one mig      readPagedLegacyInventory(
+        options => db.list<OpportunityUpdate>('opportunity_updates', options),
+        { maxRecords, pageSize: 500 },
+      ),ems.length === 0;
         }
         return { items, complete };
       })(),
